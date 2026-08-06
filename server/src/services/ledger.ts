@@ -13,6 +13,8 @@ export interface RecordImpressionInput {
   viewablePct: number
   focusPct: number
   nonce: string
+  networkHash: string | null
+  ipHash: string | null
   signature: string
 }
 
@@ -30,7 +32,7 @@ export function recordImpression(input: RecordImpressionInput): { id: string; de
   const now = Date.now()
 
   db.prepare(
-    "INSERT INTO impressions (id, serve_id, campaign_id, dev_id, device_id, surface, duration_ms, viewable_pct, focus_pct, nonce, served_at, gross_mills, dev_share_mills, reserved_mills, signature, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'credited')"
+    "INSERT INTO impressions (id, serve_id, campaign_id, dev_id, device_id, surface, duration_ms, viewable_pct, focus_pct, nonce, network_hash, ip_hash, served_at, gross_mills, dev_share_mills, reserved_mills, signature, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'credited')"
   ).run(
     id,
     input.serveId,
@@ -42,6 +44,8 @@ export function recordImpression(input: RecordImpressionInput): { id: string; de
     input.viewablePct,
     input.focusPct,
     input.nonce,
+    input.networkHash,
+    input.ipHash,
     now,
     grossMills,
     share,
@@ -79,6 +83,7 @@ export function getServe(serveId: string) {
         ad_line: string
         url: string
         nonce: string | null
+        network_hash: string | null
         issued_at: number
         expires_at: number
         status: string

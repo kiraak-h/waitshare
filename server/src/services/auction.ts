@@ -54,7 +54,7 @@ export function pendingServeCount(deviceId: string): number {
   return row.n
 }
 
-export function pickNextAd(surface: string, deviceId: string, devId: string | null): NextAd | null {
+export function pickNextAd(surface: string, deviceId: string, devId: string | null, networkHash?: string): NextAd | null {
   const candidates = listActiveCampaigns(surface).filter((c) => c.impressions_served < c.impressions_bought)
   if (candidates.length === 0) return null
   if (pendingServeCount(deviceId) >= config.maxPendingServes) return null
@@ -73,8 +73,8 @@ export function pickNextAd(surface: string, deviceId: string, devId: string | nu
   const ttl = config.serveTtlMs
 
   db.prepare(
-    "INSERT INTO serves (id, campaign_id, dev_id, device_id, surface, ad_line, url, nonce, issued_at, expires_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')"
-  ).run(serveId, pick.id, devId, deviceId, surface, pick.ad_line, pick.url, nonce, now, now + ttl)
+    "INSERT INTO serves (id, campaign_id, dev_id, device_id, surface, ad_line, url, nonce, network_hash, issued_at, expires_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')"
+  ).run(serveId, pick.id, devId, deviceId, surface, pick.ad_line, pick.url, nonce, networkHash ?? null, now, now + ttl)
 
   return {
     campaign: pick,

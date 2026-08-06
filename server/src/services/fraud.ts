@@ -7,11 +7,81 @@ export interface FraudDecision {
   reason?: string
 }
 
+export interface FleetContext {
+  devId: string | null
+  deviceId: string
+  networkHash: string
+  windowMs: number
+  farmThreshold: number
+  vpnThreshold: number
+}
+
+export function logFraudEvent(
+  type: string,
+  opts: { devId?: string | null; deviceId?: string | null; networkHash?: string | null; reason: string }
+): void {
+  db.prepare(
+    "INSERT INTO fraud_events (type, dev_id, device_id, network_hash, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+  ).run(type, opts.devId ?? null, opts.deviceId ?? null, opts.networkHash ?? null, opts.reason, Date.now())
+}
+
+export function logFleetEventOnce(ctx: FleetContext, reason: string): void {
+  const recent = db
+    .prepare(
+      "SELECT id FROM fraud_events WHERE type = 'tier2' AND dev_id = ? AND network_hash = ? AND created_at > ? LIMIT 1"
+    )
+    .get(ctx.devId ?? null, ctx.networkHash, Date.now() - ctx.windowMs)
+  if (!recent) {
+    logFraudEvent("tier2", {
+      devId: ctx.devId,
+      deviceId: ctx.deviceId,
+      networkHash: ctx.networkHash,
+      reason,
+    })
+  }
+}
+
+function bumpFraudFlags(devId: string | null, by: number): void {
+  if (devId) {
+    db.prepare("UPDATE devs SET fraud_flags = fraud_flags + ? WHERE id = ?").run(by, devId)
+  }
+}
+
+export function checkFleetSignals(ctx: FleetContext): FraudDecision {
+  const now = Date.now()
+  const since = now - ctx.windowMs
+
+  const devsOnNetwork = db
+    .prepare(
+      "SELECT COUNT(DISTINCT dev_id) AS n FROM impressions WHERE network_hash = ? AND dev_id IS NOT NULL AND served_at > ?"
+    )
+    .get(ctx.networkHash, since) as { n: number }
+
+  if (devsOnNetwork.n >= ctx.farmThreshold) {
+    return { allowed: false, reason: "shared network flagged as farm" }
+  }
+
+  if (ctx.devId) {
+    const networksForDev = db
+      .prepare(
+        "SELECT COUNT(DISTINCT network_hash) AS n FROM impressions WHERE dev_id = ? AND network_hash IS NOT NULL AND served_at > ?"
+      )
+      .get(ctx.devId, since) as { n: number }
+
+    if (networksForDev.n >= ctx.vpnThreshold) {
+      return { allowed: false, reason: "device rotated too many networks" }
+    }
+  }
+
+  return { allowed: true }
+}
+
 export function checkImpressionEligibility(
   deviceId: string,
   durationMs: number,
   viewablePct: number,
-  focusPct = 100
+  focusPct = 100,
+  fleet?: FleetContext
 ): FraudDecision {
   const minMs = config.minImpressionSeconds * 1000
   if (durationMs < minMs) {
@@ -52,9 +122,19 @@ export function checkImpressionEligibility(
     return { allowed: false, reason: "impressions too close together" }
   }
 
-  return { allowed: true }
-}
+  if (fleet) {
+    const fleetDecision = checkFleetSignals(fleet)
+    if (!fleetDecision.allowed) {
+      logFraudEvent("tier2", {
+        devId: fleet.devId,
+        deviceId: fleet.deviceId,
+        networkHash: fleet.networkHash,
+        reason: fleetDecision.reason ?? "fleet signal",
+      })
+      bumpFraudFlags(fleet.devId, 1)
+      return fleetDecision
+    }
+  }
 
-export function checkDeviceSignatureValid(pubkeyB64: string | undefined): boolean {
-  return Boolean(pubkeyB64 && pubkeyB64.length > 32)
+  return { allowed: true }
 }

@@ -65,19 +65,21 @@ served to a device twice in a row. Blocks are 1,000 impressions each.
 - **Device key registration** (`POST /auth/device`): the client generates an Ed25519 keypair and
   sends only the public key. The server never holds device private keys.
 - **Impression integrity**: the canonical signed payload is
-  `{ serveId, deviceId, durationMs, viewablePct, ts }`. The server re-serializes and verifies with
-  the registered public key. Replay is blocked by the single-use serve status.
+  `{ serveId, deviceId, durationMs, viewablePct, focusPct, nonce, ts }`. The server re-serializes and
+  verifies with the registered public key. Replay is blocked by the single-use serve status.
 - **Update integrity**: the server signs `{ platform, version, url, sha256 }`. Clients verify
   against the published public key before applying anything.
 - **Fraud controls**: minimum 10s display, minimum 50% viewability, hourly/daily per-device caps,
-  single-use 90s serves. Fleet-wide patterns (many accounts per network, one account across many
-  networks) are the documented extension point.
+  single-use 90s serves. Fleet-wide Tier 2 signals (farm: ≥`TIER2_FARM_DEVS` accounts per masked
+  network; VPN rotation: ≥`TIER2_VPN_NETWORKS` networks per account; IP binding on each serve) are
+  implemented in `services/fraud.ts` + `services/network.ts` and audited to `fraud_events`.
 
 ## Privacy guarantees
 
 - The `impressions` table stores event metrics only: serve, campaign, device, duration, viewable
   %, timestamps, gross/share, signature. No field can carry prompt or code content.
-- IP addresses are used transiently for rate limiting; nothing raw is persisted.
+- IP addresses are masked to the /24 (IPv6 /48), salted, and SHA-256 hashed; only the hashes are
+  persisted for fleet detection — nothing raw is stored.
 - There is no telemetry mode that reads prompts. Removing that option entirely is the strongest
   way to guarantee it.
 

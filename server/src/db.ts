@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS devs (
   paid_mills INTEGER NOT NULL DEFAULT 0,
   stripe_account_id TEXT,
   stripe_onboarded INTEGER NOT NULL DEFAULT 0,
+  fraud_flags INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL
 );
 
@@ -70,6 +71,7 @@ CREATE TABLE IF NOT EXISTS serves (
   ad_line TEXT NOT NULL,
   url TEXT NOT NULL,
   nonce TEXT,
+  network_hash TEXT,
   issued_at INTEGER NOT NULL,
   expires_at INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
@@ -87,6 +89,8 @@ CREATE TABLE IF NOT EXISTS impressions (
   viewable_pct INTEGER NOT NULL,
   focus_pct INTEGER NOT NULL DEFAULT 100,
   nonce TEXT,
+  network_hash TEXT,
+  ip_hash TEXT,
   served_at INTEGER NOT NULL,
   gross_mills INTEGER NOT NULL,
   dev_share_mills INTEGER NOT NULL,
@@ -94,6 +98,16 @@ CREATE TABLE IF NOT EXISTS impressions (
   reserve_released_at INTEGER,
   signature TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'credited'
+);
+
+CREATE TABLE IF NOT EXISTS fraud_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT NOT NULL,
+  dev_id TEXT,
+  device_id TEXT,
+  network_hash TEXT,
+  reason TEXT NOT NULL,
+  created_at INTEGER NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS payouts (
@@ -143,8 +157,24 @@ ensureColumn("serves", "nonce", "nonce TEXT")
 ensureColumn("impressions", "nonce", "nonce TEXT")
 ensureColumn("impressions", "focus_pct", "focus_pct INTEGER NOT NULL DEFAULT 100")
 ensureColumn("devs", "reserve_mills", "reserve_mills INTEGER NOT NULL DEFAULT 0")
+ensureColumn("devs", "fraud_flags", "fraud_flags INTEGER NOT NULL DEFAULT 0")
 ensureColumn("impressions", "reserved_mills", "reserved_mills INTEGER NOT NULL DEFAULT 0")
 ensureColumn("impressions", "reserve_released_at", "reserve_released_at INTEGER")
+ensureColumn("impressions", "network_hash", "network_hash TEXT")
+ensureColumn("impressions", "ip_hash", "ip_hash TEXT")
+ensureColumn("serves", "network_hash", "network_hash TEXT")
 ensureColumn("payouts", "available_at", "available_at INTEGER")
+
+db.exec(`
+CREATE TABLE IF NOT EXISTS fraud_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  type TEXT NOT NULL,
+  dev_id TEXT,
+  device_id TEXT,
+  network_hash TEXT,
+  reason TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+);
+`)
 
 export { db }

@@ -3,9 +3,11 @@ import { z } from "zod"
 import { db } from "../db.js"
 import { pickNextAd } from "../services/auction.js"
 import { verifyJsonSignature } from "../services/signing.js"
-import { checkImpressionEligibility } from "../services/fraud.js"
+import { checkImpressionEligibility, checkFleetSignals, logFleetEventOnce, type FleetContext } from "../services/fraud.js"
+import { deriveNetworkSignals } from "../services/network.js"
 import { getServe, recordImpression, voidServe } from "../services/ledger.js"
 import { getSplitContract } from "../services/split.js"
+import { config } from "../config.js"
 
 export const adsRouter = Router()
 
@@ -30,8 +32,26 @@ adsRouter.get("/next", (req, res) => {
     return
   }
   const devId = getSessionDevId(req)
+  const signals = deriveNetworkSignals(req)
 
-  const ad = pickNextAd(surface, deviceId, devId)
+  if (devId) {
+    const fleet: FleetContext = {
+      devId,
+      deviceId,
+      networkHash: signals.networkHash,
+      windowMs: config.tier2.windowMs,
+      farmThreshold: config.tier2.farmDevsPerNetwork,
+      vpnThreshold: config.tier2.vpnNetworksPerDev,
+    }
+    const pre = checkFleetSignals(fleet)
+    if (!pre.allowed) {
+      logFleetEventOnce(fleet, pre.reason ?? "fleet signal")
+      res.json({ ad: null, reason: pre.reason })
+      return
+    }
+  }
+
+  const ad = pickNextAd(surface, deviceId, devId, signals.networkHash)
   if (!ad) {
     res.json({ ad: null })
     return
@@ -94,6 +114,13 @@ adsRouter.post("/impressions", (req, res) => {
     return
   }
 
+  const signals = deriveNetworkSignals(req)
+  if (serve.network_hash && signals.networkHash !== serve.network_hash) {
+    voidServe(serveId)
+    res.status(403).json({ error: "network changed since serve issued" })
+    return
+  }
+
   const device = db.prepare("SELECT * FROM device_keys WHERE device_id = ?").get(deviceId) as
     | { dev_id: string; pubkey: string }
     | undefined
@@ -111,14 +138,22 @@ adsRouter.post("/impressions", (req, res) => {
     }
   }
 
-  const fraud = checkImpressionEligibility(deviceId, durationMs, viewablePct, focusPct)
+  const devId = device?.dev_id ?? serve.dev_id
+  const fleet: FleetContext = {
+    devId,
+    deviceId,
+    networkHash: signals.networkHash,
+    windowMs: config.tier2.windowMs,
+    farmThreshold: config.tier2.farmDevsPerNetwork,
+    vpnThreshold: config.tier2.vpnNetworksPerDev,
+  }
+  const fraud = checkImpressionEligibility(deviceId, durationMs, viewablePct, focusPct, fleet)
   if (!fraud.allowed) {
     voidServe(serveId)
     res.status(422).json({ error: "impression rejected", reason: fraud.reason })
     return
   }
 
-  const devId = device?.dev_id ?? serve.dev_id
   const result = recordImpression({
     serveId,
     campaignId: serve.campaign_id,
@@ -129,6 +164,8 @@ adsRouter.post("/impressions", (req, res) => {
     viewablePct,
     focusPct,
     nonce,
+    networkHash: signals.networkHash,
+    ipHash: signals.ipHash,
     signature,
   })
 

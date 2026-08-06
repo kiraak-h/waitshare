@@ -57,17 +57,30 @@ Cheap and high-coverage. Core signal plumbing is shipped; tune thresholds from r
 - **Duration shape `[PLANNED]`.** Real thinking times cluster realistically. Synthetic traffic is
   unnaturally uniform or parked exactly at the cap (e.g., always 10.0–11.0s).
 
-### Layer 2 — Graph & network intelligence `[TIER 2]`
+### Layer 2 — Graph & network intelligence `[PARTIALLY IMPLEMENTED]`
 
 This is the layer that catches collusion. Per-device rules cannot see a farm; graphs can.
 
 - Build an account ↔ device ↔ campaign ↔ IP/ASN graph and run connected-component analysis.
-- **Many accounts behind one network** → farm signature. **One account across many networks** →
-  VPN/proxy rotation signature. Both are named in the reference market's own FAQ as the
-  canonical signals; implement both directions.
-- **IP/ASN reputation.** Flag datacenter / VPS / emulator / known-proxy ranges as high risk.
-- **Privacy-respecting implementation.** Derive signals and persist only salted hashes and
-  aggregate patterns (matching the ToS: IPs are processed transiently, never stored raw).
+- **Many accounts behind one network → farm signature `[IMPLEMENTED]`.** Serves are withheld when
+  a masked network hash is shared by ≥ `TIER2_FARM_DEVS` (default 5) distinct developers within
+  `TIER2_WINDOW_MS` (default 24h).
+- **One account across many networks → VPN/proxy rotation signature `[IMPLEMENTED]`.** Serves are
+  withheld when one developer appears on ≥ `TIER2_VPN_NETWORKS` (default 3) distinct networks
+  within the window.
+- **IP binding `[IMPLEMENTED]`.** A serve is bound to the network that issued it; an impression
+  submitted from a different masked network is rejected (403) and the serve is voided.
+- **IP/ASN reputation `[HOOK, PLANNED]`.** `server/src/services/network.ts` exposes a
+  `classifyNetwork(ip)` hook returning `datacenter | residential | unknown`. Ship a GeoLite2-ASN
+  (or similar) dataset behind it to flag DC/VPS/proxy ranges; without one it stays `unknown` and
+  is not enforced.
+- **Audit trail `[IMPLEMENTED]`.** Farm/VPN rejections and impression-time fleet rejections are
+  recorded to the `fraud_events` table (deduped per dev+network per window) and increment
+  `devs.fraud_flags`.
+- **Privacy-respecting implementation `[IMPLEMENTED]`.** IPs are masked to the /24 (or /48 for
+  IPv6), then salted (persistent per-instance salt in `data/fraud-salt`, or `FRAUD_SALT`) and
+  SHA-256 hashed. Only the hashes are persisted — matching the ToS: IPs are processed
+  transiently, never stored raw.
 
 ### Layer 3 — ML scoring + payout holds `[PARTIAL]`
 
@@ -127,8 +140,9 @@ only salted hashes and aggregates. GDPR legitimate-interest basis for anti-fraud
    plumbing, quality thresholds, env-tunable caps. Ship and collect baseline distributions.
 2. **Tier 1 (`[DONE]`)** — challenge nonce, focus flag, pending-serve cap, inter-impression spacing.
    Remaining: tune the inter-arrival and duration-shape detectors from real data.
-3. **Tier 2** — graph + IP/ASN reputation (payout clearing window and reserve buffer are already
-   implemented).
+3. **Tier 2 (`[PARTIALLY IMPLEMENTED]`)** — graph + IP/ASN reputation: farm, VPN-rotation, and IP
+   binding detection are live behind env-tunable thresholds; ASN reputation is a hook awaiting a
+   GeoLite2 dataset. Payout clearing window and reserve buffer are already implemented.
 4. **Tier 3** — ML scoring ensemble; graduated trust; automated blocking with human review queue.
 
 Every tier is additive and doesn't change the impression contract, so honest clients keep

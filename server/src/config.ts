@@ -23,6 +23,12 @@ export const config = {
   minFocusPct: Number(process.env.MIN_FOCUS_PCT ?? 0),
   minGapMs: Number(process.env.MIN_GAP_MS ?? 0),
   maxPendingServes: Number(process.env.MAX_PENDING_SERVES ?? 2),
+  fraudSalt: process.env.FRAUD_SALT ?? "",
+  tier2: {
+    farmDevsPerNetwork: Number(process.env.TIER2_FARM_DEVS ?? 5),
+    vpnNetworksPerDev: Number(process.env.TIER2_VPN_NETWORKS ?? 3),
+    windowMs: Number(process.env.TIER2_WINDOW_MS ?? 24 * 60 * 60 * 1000),
+  },
   serveTtlMs: Number(process.env.SERVE_TTL_MS ?? 90_000),
   caps: {
     hourlyImpressions: Number(process.env.CAP_HOURLY ?? 60),

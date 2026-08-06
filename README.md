@@ -107,7 +107,7 @@ Google OAuth is available for developers: the dashboard's "Continue with Google"
 and redirects back to the dashboard with a session token in the URL fragment. Set `GOOGLE_CLIENT_ID` and
 `GOOGLE_CLIENT_SECRET` to enable; email sign-in remains as a demo fallback.
 
-## Fraud controls (Tier 1)
+## Fraud controls
 
 Impression integrity beyond signatures:
 
@@ -118,6 +118,17 @@ Impression integrity beyond signatures:
 - **Env-tunable caps.** `CAP_HOURLY`, `CAP_DAILY`, `MAX_PENDING_SERVES` (serve hoarding), `MIN_GAP_MS`
   (inter-impression spacing), `SERVE_TTL_MS`, `MIN_IMPRESSION_SECONDS`, `MIN_VIEWABLE_PCT`. Payout
   safety: `PAYOUT_HOLD_MS` (clearing window), `RESERVE_PCT` + `RESERVE_RELEASE_MS` (clawback reserve).
+- **Fleet-wide (Tier 2).** IPs are masked to the /24 (IPv6 /48), salted (`FRAUD_SALT` or a
+  persistent per-instance salt), and SHA-256 hashed; only the hashes are stored. Detection:
+  - **Farm** — a masked network shared by ≥ `TIER2_FARM_DEVS` (5) distinct developers within
+    `TIER2_WINDOW_MS` (24h) is withheld from serving.
+  - **VPN rotation** — a developer appearing on ≥ `TIER2_VPN_NETWORKS` (3) distinct networks within
+    the window is withheld.
+  - **IP binding** — each serve is bound to the network that issued it; an impression from a
+    different masked network is rejected (403) and the serve voided.
+  - Rejections land in the `fraud_events` audit table and increment `devs.fraud_flags`.
+  - `server/src/services/network.ts` exposes a `classifyNetwork()` hook for ASN/DC reputation; it
+    stays unenforced until a GeoLite2 dataset is supplied.
 
 ## Signed updates
 
@@ -145,10 +156,12 @@ Client updates are integrity-protected end-to-end:
 - Device keys are generated client-side; the server stores only the public key.
 - Impression payloads must be signed with the registered device key and echo the serve's challenge
   nonce; the server rejects unsigned, wrongly-signed, or nonce-mismatched events.
-- IP addresses are used transiently for rate limiting; only hashed forms are stored.
+- IP addresses are masked to the /24 (IPv6 /48), salted, and SHA-256 hashed; only the hashes are
+  persisted and used transiently for fleet detection — raw IPs are never stored.
 - Serve records expire after 90 seconds, can be used once, and cap at `MAX_PENDING_SERVES` per device.
 
 ## Production roadmap
 
-- Fleet-wide fraud detection (per-network farm detection, VPN rotation signals).
+- ASN/DC reputation: supply a GeoLite2 dataset behind the `classifyNetwork()` hook and enforce it.
+- ML scoring ensemble (Tier 3) + graduated trust with a human review queue.
 - Relational database for production scale; real Stripe/Google credentials; CI pipeline.
