@@ -1,0 +1,154 @@
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
+
+const CONFIG_PATH = path.join(os.homedir(), ".waitshare", "config.json")
+const SURFACE = "opencode"
+const MIN_DURATION_MS = 10_000
+
+function b64decode(s: string): Uint8Array<ArrayBuffer> {
+  const bin = atob(s)
+  const bytes = new Uint8Array(new ArrayBuffer(bin.length))
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return bytes
+}
+
+function b64encode(bytes: Uint8Array): string {
+  let bin = ""
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
+  return btoa(bin)
+}
+
+async function signPayload(payload: Record<string, unknown>, privateKeyB64: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "pkcs8",
+    b64decode(privateKeyB64),
+    { name: "Ed25519" },
+    false,
+    ["sign"]
+  )
+  const encoded = new TextEncoder().encode(JSON.stringify(payload))
+  const data = new Uint8Array(new ArrayBuffer(encoded.byteLength))
+  data.set(encoded)
+  const sig = await crypto.subtle.sign(null, key, data)
+  return b64encode(new Uint8Array(sig))
+}
+
+export const WaitSharePlugin = async ({ client }: { client: any }) => {
+  let config: { api: string; token: string; deviceId: string; privateKeyB64: string } | null = null
+  let active = false
+  let serve: { serveId: string; adLine: string; nonce: string; startedAt: number } | null = null
+
+  try {
+    if (fs.existsSync(CONFIG_PATH)) {
+      config = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"))
+    }
+  } catch (e) {
+    console.error("[waitshare] could not load config:", e)
+  }
+
+  if (!config) {
+    console.error(
+      `[waitshare] not configured. Run: node clients/opencode/setup.mjs then reload opencode.`
+    )
+  }
+
+  async function startRun() {
+    if (!config || active) return
+    active = true
+    try {
+      const res = await fetch(
+        `${config.api}/ads/next?surface=${SURFACE}&deviceId=${encodeURIComponent(config.deviceId)}`,
+        { headers: { authorization: `Bearer ${config.token}` } }
+      )
+      const body = await res.json()
+      if (body?.ad) {
+        serve = { serveId: body.ad.serveId, adLine: body.ad.adLine, nonce: body.ad.nonce, startedAt: Date.now() }
+        await client?.app?.log?.({
+          body: {
+            service: "waitshare",
+            level: "info",
+            message: `Sponsored · ${body.ad.adLine}`,
+            extra: { serveId: body.ad.serveId, surface: SURFACE },
+          },
+        })
+      }
+    } catch (e) {
+      console.error("[waitshare] ad fetch failed:", e)
+    }
+  }
+
+  async function endRun() {
+    if (!config || !active) return
+    active = false
+    if (!serve) return
+    const { serveId, startedAt, nonce } = serve
+    serve = null
+
+    const durationMs = Date.now() - startedAt
+    if (durationMs < MIN_DURATION_MS) return
+
+    try {
+      const payload = {
+        serveId,
+        deviceId: config.deviceId,
+        durationMs,
+        viewablePct: 95,
+        focusPct: 100,
+        nonce,
+        ts: Date.now(),
+      }
+      const signature = await signPayload(payload, config.privateKeyB64)
+      const res = await fetch(`${config.api}/ads/impressions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...payload, signature }),
+      })
+      const body = await res.json()
+      if (body?.credited) {
+        await client?.app?.log?.({
+          body: {
+            service: "waitshare",
+            level: "info",
+            message: `credited ${body.devShareMills} mills for ${(durationMs / 1000).toFixed(0)}s of spinner`,
+            extra: { impressionId: body.impressionId },
+          },
+        })
+      } else {
+        console.error("[waitshare] impression rejected:", body?.error, body?.reason ?? "")
+      }
+    } catch (e) {
+      console.error("[waitshare] impression report failed:", e)
+    }
+  }
+
+  function isRunning(event: any): boolean {
+    const p = event?.properties ?? {}
+    const status = String(p.status ?? "").toLowerCase()
+    return (
+      event?.type === "session.status" &&
+      (status === "running" || status === "working" || status === "queued")
+    )
+  }
+
+  function isIdle(event: any): boolean {
+    const p = event?.properties ?? {}
+    const status = String(p.status ?? "").toLowerCase()
+    if (event?.type === "session.idle") return true
+    return (
+      event?.type === "session.status" &&
+      (status === "idle" || status === "error" || status === "completed" || status === "paused")
+    )
+  }
+
+  return {
+    event: async ({ event }: { event: any }) => {
+      try {
+        if (isRunning(event)) await startRun()
+        else if (isIdle(event)) await endRun()
+      } catch (e) {
+        console.error("[waitshare] event handling failed:", e)
+      }
+    },
+  }
+}

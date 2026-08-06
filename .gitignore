@@ -156,8 +156,14 @@
 **/.flutter-plugins
 **/.flutter-plugins-dependencies
 
+# WaitShare
+server/data/
+*.vsix
+~/.waitshare/
+
 # Compressed files
 *.zip
+
 *.rar
 *.7z
 *.tar
