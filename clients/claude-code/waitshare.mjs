@@ -3,12 +3,14 @@ import crypto from "node:crypto"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import * as updater from "../shared/updater.mjs"
 
 const HOME = process.env.WAITSHARE_HOME ?? path.join(os.homedir(), ".waitshare")
 const CONFIG_PATH = path.join(HOME, "config.json")
 const CURRENT_PATH = path.join(HOME, "current.json")
 const SURFACE = "claude-code-cli"
 const MIN_DURATION_MS = 10_000
+const VERSION = "0.1.0"
 
 function readConfig() {
   if (!fs.existsSync(CONFIG_PATH)) {
@@ -98,11 +100,33 @@ async function report() {
   }
 }
 
+async function update() {
+  const config = readConfig()
+  try {
+    const result = await updater.checkForUpdate({
+      api: config.api,
+      platform: SURFACE,
+      currentVersion: VERSION,
+    })
+    if (!result.available) {
+      console.error("[waitshare] already up to date")
+      return
+    }
+    updater.applyArtifact(new URL(import.meta.url).pathname, result.artifact)
+    console.error(
+      `[waitshare] updated ${SURFACE} to ${result.latest.version} (Ed25519 + sha256 verified)`
+    )
+  } catch (e) {
+    console.error(`[waitshare] update failed: ${e.message}`)
+  }
+}
+
 const cmd = process.argv[2]
 if (cmd === "start") await start()
 else if (cmd === "status") status()
 else if (cmd === "report") await report()
+else if (cmd === "update") await update()
 else {
-  console.error("usage: waitshare.mjs <start|status|report>")
+  console.error("usage: waitshare.mjs <start|status|report|update>")
   process.exit(1)
 }

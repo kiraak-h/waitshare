@@ -12,6 +12,7 @@ export const config = {
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
   googleClientId: process.env.GOOGLE_CLIENT_ID ?? "",
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+  adminToken: process.env.ADMIN_TOKEN ?? "",
   paymentThresholdCents: Number(process.env.PAYMENT_THRESHOLD_CENTS ?? 1000),
   payoutHoldMs: Number(process.env.PAYOUT_HOLD_MS ?? 72 * 60 * 60 * 1000),
   reservePct: Number(process.env.RESERVE_PCT ?? 10),

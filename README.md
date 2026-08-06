@@ -48,7 +48,8 @@ node clients/shared/setup.mjs
 
 - **Opencode:** copy `clients/opencode/plugin.ts` to `~/.config/opencode/plugins/`, reload opencode.
 - **Claude Code CLI:** `bash clients/claude-code/install.sh` — patches `statusLine` + `SessionStart`/`Stop`
-  hooks in `~/.claude/settings.json` (backup written first, restore command printed).
+  hooks in `~/.claude/settings.json` (backup written first, restore command printed). Self-update:
+  `node clients/claude-code/waitshare.mjs update`.
 - **VS Code:** build with `npm run build` in `clients/vscode`, package with `vsce`, install. The
   status bar renders the shared sponsored line and the `WaitShare: Verify update signature` command
   demonstrates signed-update verification.
@@ -71,6 +72,8 @@ All routes are under `/api/v1`.
 | `GET /auction/state` | Live market: surface CPMs, impressions/hr |
 | `GET /ledger` | Public transparency ledger |
 | `GET /updates/latest` · `GET /updates/key` | Signed update manifest + server public key |
+| `GET`/`PUT /updates/artifacts/:name` | Download / upload update artifacts (PUT is admin-only) |
+| `POST /updates/` | Publish a signed manifest (admin token required) |
 | `GET /split` | The locked revenue split contract |
 
 ## Payments
@@ -116,6 +119,27 @@ Impression integrity beyond signatures:
   (inter-impression spacing), `SERVE_TTL_MS`, `MIN_IMPRESSION_SECONDS`, `MIN_VIEWABLE_PCT`. Payout
   safety: `PAYOUT_HOLD_MS` (clearing window), `RESERVE_PCT` + `RESERVE_RELEASE_MS` (clawback reserve).
 
+## Signed updates
+
+Client updates are integrity-protected end-to-end:
+
+1. Publish an artifact and manifest (admin only — `ADMIN_TOKEN` required):
+
+   ```bash
+   WAITSHARE_ADMIN_TOKEN=<token> node server/scripts/publish-update.mjs claude-code-cli 0.2.0 ./artifact.mjs
+   ```
+
+   The script uploads the artifact, computes its sha256, and stores an Ed25519-signed manifest.
+   The signature covers exactly `{ platform, version, url, sha256 }` (stable key order) and can be
+   verified against the public key at `GET /updates/key`.
+2. Clients check `GET /updates/latest?platform=&version=`; the shared updater
+   (`clients/shared/updater.mjs`) verifies the manifest signature, downloads the artifact, and
+   verifies its sha256 before applying atomically (write-temp + rename).
+3. Wired surfaces: `waitshare.mjs update` (Claude Code CLI, self-replaces), the VS Code
+   `WaitShare: Update extension (verified)` command (downloads + installs the `.vsix`), and the
+   opencode plugin logs a verified-update notice on load. Any manifest or artifact that fails
+   verification is refused.
+
 ## Security notes
 
 - Device keys are generated client-side; the server stores only the public key.
@@ -127,4 +151,4 @@ Impression integrity beyond signatures:
 ## Production roadmap
 
 - Fleet-wide fraud detection (per-network farm detection, VPN rotation signals).
-- Client self-update with mandatory Ed25519 signature verification before apply.
+- Relational database for production scale; real Stripe/Google credentials; CI pipeline.

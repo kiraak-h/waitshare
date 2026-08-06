@@ -1,10 +1,12 @@
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import nodeCrypto from "node:crypto"
 
 const CONFIG_PATH = path.join(os.homedir(), ".waitshare", "config.json")
 const SURFACE = "opencode"
 const MIN_DURATION_MS = 10_000
+const VERSION = "0.1.0"
 
 function b64decode(s: string): Uint8Array<ArrayBuffer> {
   const bin = atob(s)
@@ -150,5 +152,40 @@ export const WaitSharePlugin = async ({ client }: { client: any }) => {
         console.error("[waitshare] event handling failed:", e)
       }
     },
+  }
+}
+
+void checkForUpdateOnce()
+
+async function checkForUpdateOnce() {
+  try {
+    let config: { api: string } | null = null
+    if (fs.existsSync(CONFIG_PATH)) config = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"))
+    if (!config) return
+    const keyRes = await fetch(`${config.api}/updates/key`)
+    const { publicKey } = await keyRes.json()
+    const res = await fetch(`${config.api}/updates/latest?platform=${SURFACE}&version=${VERSION}`)
+    const body = await res.json()
+    if (!body?.latest || body?.upToDate) return
+    const { platform, version, url, sha256, signature } = body.latest
+    const payload = { platform, version, url, sha256 }
+    const key = nodeCrypto.createPublicKey({
+      key: Buffer.from(publicKey, "base64"),
+      format: "der",
+      type: "spki",
+    })
+    const valid = nodeCrypto.verify(
+      null,
+      Buffer.from(JSON.stringify(payload)),
+      key,
+      Buffer.from(signature, "base64")
+    )
+    if (valid) {
+      console.log(`[waitshare] update available: ${version} (Ed25519 verified)`)
+    } else {
+      console.error(`[waitshare] update manifest signature INVALID for ${version}`)
+    }
+  } catch (e) {
+    console.error("[waitshare] update check failed:", e)
   }
 }

@@ -3,13 +3,16 @@ import crypto from "node:crypto"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { exec } from "node:child_process"
 
 const SURFACE = "vscode"
 const MIN_DURATION_MS = 10_000
+const VERSION = "0.1.0"
 
 const home = () => path.join(os.homedir(), ".waitshare")
 const configPath = () => path.join(home(), "config.json")
 const currentPath = () => path.join(home(), "current.json")
+const downloadsDir = () => path.join(home(), "downloads")
 
 interface Config {
   api: string
@@ -173,7 +176,7 @@ export function activate(context: vscode.ExtensionContext) {
     try {
       const keyRes = await fetch(`${config.api}/updates/key`)
       const { publicKey } = (await keyRes.json()) as { publicKey: string }
-      const manifestRes = await fetch(`${config.api}/updates/latest?platform=${SURFACE}&version=0`)
+      const manifestRes = await fetch(`${config.api}/updates/latest?platform=${SURFACE}&version=${VERSION}`)
       const manifest = (await manifestRes.json()) as {
         latest?: { platform: string; version: string; url: string; sha256: string; signature: string }
       }
@@ -181,23 +184,80 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage("WaitShare: no update manifest published yet")
         return
       }
-      const { signature, ...rest } = manifest.latest
+      const { platform, version, url, sha256, signature } = manifest.latest
+      const payload = { platform, version, url, sha256 }
       const key = crypto.createPublicKey({ key: Buffer.from(publicKey, "base64"), format: "der", type: "spki" })
       const valid = crypto.verify(
         null,
-        Buffer.from(JSON.stringify(rest)),
+        Buffer.from(JSON.stringify(payload)),
         key,
         Buffer.from(signature, "base64")
       )
       vscode.window.showInformationMessage(
-        `WaitShare: manifest ${manifest.latest.version} signature ${valid ? "VERIFIED (Ed25519)" : "INVALID"}`
+        `WaitShare: manifest ${version} signature ${valid ? "VERIFIED (Ed25519)" : "INVALID"}`
       )
     } catch (e) {
       vscode.window.showErrorMessage(`WaitShare: verification failed — ${String(e)}`)
     }
   })
 
-  context.subscriptions.push(bar, statusCmd, startCmd, reportCmd, verifyCmd, focusListener, {
+  const updateCmd = vscode.commands.registerCommand("waitshare.update", async () => {
+    const config = loadConfig()
+    if (!config) return
+    try {
+      const keyRes = await fetch(`${config.api}/updates/key`)
+      const { publicKey } = (await keyRes.json()) as { publicKey: string }
+      const manifestRes = await fetch(`${config.api}/updates/latest?platform=${SURFACE}&version=${VERSION}`)
+      const manifest = (await manifestRes.json()) as {
+        upToDate?: boolean
+        latest?: { platform: string; version: string; url: string; sha256: string; signature: string }
+      }
+      if (!manifest.latest) {
+        vscode.window.showInformationMessage("WaitShare: no update manifest published yet")
+        return
+      }
+      if (manifest.upToDate) {
+        vscode.window.showInformationMessage("WaitShare: already up to date")
+        return
+      }
+      const { platform, version, url, sha256, signature } = manifest.latest
+      const payload = { platform, version, url, sha256 }
+      const key = crypto.createPublicKey({ key: Buffer.from(publicKey, "base64"), format: "der", type: "spki" })
+      if (!crypto.verify(null, Buffer.from(JSON.stringify(payload)), key, Buffer.from(signature, "base64"))) {
+        vscode.window.showErrorMessage("WaitShare: update manifest signature INVALID — refusing update")
+        return
+      }
+
+      const artRes = await fetch(url)
+      if (!artRes.ok) throw new Error(`download failed: ${artRes.status}`)
+      const artifact = Buffer.from(await artRes.arrayBuffer())
+      const hash = crypto.createHash("sha256").update(artifact).digest("hex")
+      if (hash !== sha256) {
+        vscode.window.showErrorMessage("WaitShare: artifact sha256 MISMATCH — refusing update")
+        return
+      }
+
+      fs.mkdirSync(downloadsDir(), { recursive: true })
+      const vsixPath = path.join(downloadsDir(), `waitshare-${version}.vsix`)
+      fs.writeFileSync(vsixPath, artifact)
+      vscode.window.showInformationMessage(
+        `WaitShare: verified ${version} (Ed25519 + sha256). Installing…`
+      )
+      exec(`code --install-extension "${vsixPath}"`, (err) => {
+        if (err) {
+          vscode.window.showInformationMessage(
+            `WaitShare: install manually with: code --install-extension "${vsixPath}"`
+          )
+          return
+        }
+        vscode.window.showInformationMessage("WaitShare: installed — reload VS Code to finish.")
+      })
+    } catch (e) {
+      vscode.window.showErrorMessage(`WaitShare: update failed — ${String(e)}`)
+    }
+  })
+
+  context.subscriptions.push(bar, statusCmd, startCmd, reportCmd, verifyCmd, updateCmd, focusListener, {
     dispose: () => {
       if (watcher) watcher.close()
       if (debounce) clearTimeout(debounce)

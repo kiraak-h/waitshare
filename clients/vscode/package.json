@@ -31,6 +31,10 @@
       {
         "command": "waitshare.verifyUpdate",
         "title": "WaitShare: Verify update signature"
+      },
+      {
+        "command": "waitshare.update",
+        "title": "WaitShare: Update extension (verified)"
       }
     ]
   },
