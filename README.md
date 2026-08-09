@@ -128,16 +128,23 @@ Impression integrity beyond signatures:
   - **IP binding** — each serve is bound to the network that issued it; an impression from a
     different masked network is rejected (403) and the serve voided.
   - Rejections land in the `fraud_events` audit table and increment `devs.fraud_flags`.
-  - **ASN/DC reputation** — `server/src/services/asn.ts` classifies IPs against a bundled AWS +
-    DigitalOcean range dataset (`server/assets/asn.json`); with `TIER2_DC_ENFORCE` on (default),
+  - **ASN/DC reputation** — `server/src/services/asn.ts` classifies IPs against a multi-provider
+    range dataset (`server/assets/asn.json`, ~68.5k ranges from AWS, Google, Microsoft, Oracle,
+    DigitalOcean; built by `server/scripts/build-asn.mjs`); with `TIER2_DC_ENFORCE` on (default),
     datacenter/cloud networks are withheld from serving (`tier2-dc` events logged).
-- **Risk scoring + trust tiers (Tier 3).** Every impression gets a 0–100 risk score
-  (`server/src/services/scoring.ts`) from activity-shape statistics (regularity, duration/
-  viewability uniformity, rate, network rotation, flags, account youth) — no content factors.
-  Score ≥ `TIER3_HIGH_RISK` (75) rejects, ≥ `TIER3_REVIEW` (55) flags for review. Trust tiers
-  (`0` new → `1` established → `2` trusted) gate serve caps, and tier-0 accounts get reduced
-  hourly/daily caps plus a `TIER0_PAYOUT_CAP_CENTS` payout gate. Admins clear/review/suspend via
-  `/api/v1/admin/review`.
+- **Risk scoring + trust tiers (Tier 3).** Every impression gets a 0–100 risk score through a
+  pluggable `RiskModel` (`server/src/services/risk-model.ts`): a deterministic heuristic model or
+  a trained logistic model loaded from `server/assets/risk-model.json` (`TIER3_MODEL_PATH`
+  overrides; malformed/missing → heuristic fallback). Features are activity-shape statistics only
+  (regularity, duration/viewability uniformity, rate, network rotation, flags, account youth) —
+  no content factors. Score ≥ `TIER3_HIGH_RISK` (75) rejects, ≥ `TIER3_REVIEW` (55) flags for
+  review. Trust tiers (`0` new → `1` established → `2` trusted) gate serve caps, and tier-0
+  accounts get reduced hourly/daily caps plus a `TIER0_PAYOUT_CAP_CENTS` payout gate. Admins
+  clear/review/suspend via `/api/v1/admin/review`.
+- **Advertiser chargeback defense (Tier 4).** Live checkout runs Stripe Radar on every charge;
+  `charge.dispute.created` / `charge.dispute.closed` / `charge.refunded` webhooks flip the
+  campaign to `disputed` / `refunded` (delivery stops) and log a `chargeback` row in
+  `fraud_events` for operator review.
 
 ## Signed updates
 
@@ -189,12 +196,15 @@ Client updates are integrity-protected end-to-end:
 
 ## Production roadmap
 
-Shipped: ASN/DC reputation (bundled dataset + enforcement), deterministic risk scoring (Tier 3)
-with graduated trust tiers and a human review queue, and a native Postgres runtime (async
-data-access layer + idempotent schema).
+Shipped: ASN/DC reputation (multi-provider dataset — AWS, Google, Microsoft, Oracle,
+DigitalOcean — with enforcement), pluggable risk scoring (heuristic + trained logistic model
+behind one interface), graduated trust tiers with a human review queue, advertiser chargeback/
+Radar defense (dispute/refund webhooks), and a native Postgres runtime (async data-access layer +
+idempotent schema).
 
 Remaining (all behind existing interfaces, no contract changes):
-- Swap the deterministic `scoreImpression()` weights for a supervised ML ensemble trained on
-  labeled review-queue data.
-- Broaden the ASN dataset beyond AWS/DigitalOcean (drop in a GeoLite2-style dataset via
-  `ASN_DB_PATH`) and add advertiser-side chargeback/Radar defense.
+- Replace the synthetic logistic weights in `server/assets/risk-model.json` with a supervised
+  model trained on labeled review-queue data (`npm run train:risk -w server` retrains).
+- Fold RIPE-announced prefixes for additional cloud ASNs into `server/assets/asn.json` where the
+  RIPE Stat API is reachable (the builder already supports it; CI can regenerate via
+  `npm run build:asn -w server`).

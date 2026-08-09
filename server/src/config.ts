@@ -71,6 +71,7 @@ export const config = {
   tier3: {
     highRisk: Number(process.env.TIER3_HIGH_RISK ?? 75),
     review: Number(process.env.TIER3_REVIEW ?? 55),
+    modelPath: process.env.TIER3_MODEL_PATH ?? path.resolve(import.meta.dirname, "../assets/risk-model.json"),
     establishedImpressions: Number(process.env.TRUST_ESTABLISHED_IMPRESSIONS ?? 50),
     establishedDays: Number(process.env.TRUST_ESTABLISHED_DAYS ?? 7),
     trustedImpressions: Number(process.env.TRUST_TRUSTED_IMPRESSIONS ?? 2000),

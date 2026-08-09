@@ -61,6 +61,8 @@ CREATE TABLE IF NOT EXISTS campaigns (
   country_filter     TEXT,
   delivery_speed     TEXT NOT NULL DEFAULT 'fast',
   status             TEXT NOT NULL DEFAULT 'active',
+  stripe_checkout_id TEXT,
+  payment_intent_id  TEXT,
   created_at         BIGINT NOT NULL,
   updated_at         BIGINT NOT NULL
 );
@@ -159,6 +161,8 @@ ALTER TABLE serves ADD COLUMN IF NOT EXISTS network_hash TEXT;
 ALTER TABLE devs ADD COLUMN IF NOT EXISTS reserve_mills BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE devs ADD COLUMN IF NOT EXISTS fraud_flags INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE payouts ADD COLUMN IF NOT EXISTS available_at BIGINT;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS stripe_checkout_id TEXT;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS payment_intent_id TEXT;
 
 -- Indexes for the hot query paths (see server/src/services/*)
 CREATE INDEX IF NOT EXISTS idx_serves_device_status   ON serves (device_id, status);

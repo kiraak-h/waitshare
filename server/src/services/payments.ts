@@ -98,6 +98,9 @@ class LiveStripeProvider implements PaymentProvider {
           quantity: 1,
         },
       ],
+      // Checkout runs the account's enabled payment methods and Stripe Radar
+      // evaluates every charge; chargeback/refund handling lives in the
+      // webhook handlers (charge.dispute.* / charge.refunded).
       metadata: opts.metadata,
       success_url: opts.successUrl,
       cancel_url: opts.cancelUrl,

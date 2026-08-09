@@ -72,10 +72,13 @@ This is the layer that catches collusion. Per-device rules cannot see a farm; gr
 - **IP binding `[IMPLEMENTED]`.** A serve is bound to the network that issued it; an impression
   submitted from a different masked network is rejected (403) and the serve is voided.
 - **IP/ASN reputation `[IMPLEMENTED]`.** `server/src/services/asn.ts` classifies IPs as
-  `datacenter | residential | unknown` against a bundled AWS + DigitalOcean range dataset
-  (`server/assets/asn.json`, binary-search lookup, IPv4 + IPv6). With `TIER2_DC_ENFORCE` on
-  (default), serves are withheld from datacenter/cloud networks and a `tier2-dc` event is logged.
-  `ASN_DB_PATH` overrides the dataset; unmatched IPs classify `residential` (conservative).
+  `datacenter | residential | unknown` against a multi-provider range dataset
+  (`server/assets/asn.json`, binary-search lookup, IPv4 + IPv6) built from AWS, Google Cloud,
+  Microsoft Azure, Oracle, and DigitalOcean public ranges plus optional RIPE announced-prefix
+  lookups for major cloud ASNs (`server/scripts/build-asn.mjs`, ~68.5k ranges). With
+  `TIER2_DC_ENFORCE` on (default), serves are withheld from datacenter/cloud networks and a
+  `tier2-dc` event is logged. `ASN_DB_PATH` overrides the dataset; unmatched IPs classify
+  `residential` (conservative).
 - **Audit trail `[IMPLEMENTED]`.** Farm/VPN rejections and impression-time fleet rejections are
   recorded to the `fraud_events` table (deduped per dev+network per window) and increment
   `devs.fraud_flags`.
@@ -88,12 +91,18 @@ This is the layer that catches collusion. Per-device rules cannot see a farm; gr
 
 Where money is actually protected.
 
-- **Deterministic risk score `[IMPLEMENTED]`.** Every impression is scored 0–100
-  (`server/src/services/scoring.ts`) from activity-shape statistics — regularity, duration and
-  viewability uniformity, request rate, network rotation, fraud flags, and account youth. No
-  content factors, ever. Score ≥ `TIER3_HIGH_RISK` (75) rejects and increments `fraud_flags`;
-  ≥ `TIER3_REVIEW` (55) logs a review event. The feature set is the v0 of the planned ML
-  ensemble; swap in a supervised model behind the same `scoreImpression()` interface later.
+- **Pluggable risk model `[IMPLEMENTED]`.** Every impression is scored 0–100 through a
+  `RiskModel` interface (`server/src/services/risk-model.ts`): a deterministic `HeuristicModel`
+  (v0, threshold-matched to the original scoring) or a `LogisticModel` (sigmoid over the same
+  normalized features). `getRiskModel()` lazy-loads `server/assets/risk-model.json`
+  (`TIER3_MODEL_PATH` overrides) and falls back to the heuristic model if the file is missing or
+  malformed. The shipped weights come from `server/scripts/train-risk-model.mjs`, a synthetic
+  logistic-regression trainer (3k honest + 3k bot Gaussian samples, L2 regularization, 80/20
+  split) that currently reaches 1.000 accuracy with zero false positives at the 75 threshold.
+  Those weights are a placeholder pending real labeled data — swap new weights in behind the
+  same interface without touching scoring call sites. Score ≥ `TIER3_HIGH_RISK` (75) rejects
+  and increments `fraud_flags`; ≥ `TIER3_REVIEW` (55) logs a review event. No content factors,
+  ever.
 - **Graduated trust `[IMPLEMENTED]`.** `computeTrustTier()` derives `0 = new`, `1 = established`
   (≥ 50 impressions / 7 days), `2 = trusted` (≥ 2000 impressions / 30 days, zero flags). Trust
   tier 0 gets reduced hourly/daily caps (`TIER0_CAP_*`) and a single-payout cap
@@ -107,13 +116,20 @@ Where money is actually protected.
   `devs.reserve_mills` at credit time and released back to the available balance after
   `RESERVE_RELEASE_MS` (default 30 days) via the same sweeper.
 
-### Layer 4 — Human review & advertiser protection `[IMPLEMENTED BASELINE, EXPAND]`
+### Layer 4 — Human review & advertiser protection `[IMPLEMENTED]`
 
 - Review queue for flagged accounts; preserve the automated-decision appeal path (GDPR Art. 22
   right to human review, ToS §9.7).
 - Settle advertiser billing only against post-vetting impressions; issue credits for voided
   delivery (ToS advertiser section already permits this).
-- Chargeback defense on the advertiser checkout side (Stripe Radar / chargeback protection).
+- **Chargeback / refund defense `[IMPLEMENTED]`.** Live checkout (`server/src/services/payments.ts`)
+  runs Stripe Radar on every advertiser charge. Webhook handling
+  (`server/src/routes/webhooks.ts`) persists the `stripe_checkout_id` / `payment_intent_id` on
+  the campaign at `checkout.session.completed`, then reacts to `charge.dispute.created`
+  (campaign → `status = 'disputed'` and a `chargeback` row in `fraud_events`), `charge.refunded`
+  (fully refunded → `status = 'refunded'`), and `charge.dispute.closed`. Disputed/refunded
+  campaigns stop serving immediately and can be re-reviewed by an operator before any further
+  delivery. Stub mode mirrors these statuses so the payment-risk lifecycle is testable offline.
 
 ## Known hard problem: human vs. agent-initiated waits
 
@@ -150,9 +166,12 @@ only salted hashes and aggregates. GDPR legitimate-interest basis for anti-fraud
 3. **Tier 2 (`[IMPLEMENTED]`)** — graph + IP/ASN reputation: farm, VPN-rotation, IP-binding, and
    datacenter-network detection are live behind env-tunable thresholds, with the bundled ASN
    dataset. Payout clearing window and reserve buffer are also implemented.
-4. **Tier 3 (`[IMPLEMENTED]`)** — deterministic risk scoring, graduated trust tiers with
-   per-tier caps and payout gates, and an admin review queue (clear/review/suspend). The
-   supervised-ML scoring ensemble replaces `scoreImpression()` behind the same interface.
+4. **Tier 3 (`[IMPLEMENTED]`)** — pluggable risk scoring (heuristic v0 + trained logistic model
+   behind one interface), graduated trust tiers with per-tier caps and payout gates, and an admin
+   review queue (clear/review/suspend).
+5. **Tier 4 (`[IMPLEMENTED BASELINE]`)** — advertiser chargeback/refund defense via Stripe Radar
+   and dispute webhooks that suspend delivery; remaining work is real-data tuning of the risk
+   weights and operational runbooks for dispute handling.
 
 Every tier is additive and doesn't change the impression contract, so honest clients keep
 working unchanged.

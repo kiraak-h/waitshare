@@ -1,8 +1,10 @@
 import { db } from "../db.js"
 import { config } from "../config.js"
+import { getRiskModel, type RiskFeatures } from "./risk-model.js"
 
 export interface ScoreResult {
   score: number
+  model: string
   reject: boolean
   review: boolean
   factors: Record<string, number | null>
@@ -14,22 +16,71 @@ interface RecentRow {
   served_at: number
 }
 
-function meanStd(values: number[]): { mean: number; std: number } {
+export function meanStd(values: number[]): { mean: number; std: number } {
   if (values.length === 0) return { mean: 0, std: 0 }
   const mean = values.reduce((a, b) => a + b, 0) / values.length
   const variance = values.reduce((a, b) => a + (b - mean) ** 2, 0) / values.length
   return { mean, std: Math.sqrt(variance) }
 }
 
-function cv(values: number[]): number | null {
+export function cv(values: number[]): number | null {
   if (values.length < 3) return null
   const { mean, std } = meanStd(values)
   if (mean === 0) return null
   return std / mean
 }
 
-function clamp01(x: number): number {
+export function clamp01(x: number): number {
   return Math.max(0, Math.min(1, x))
+}
+
+export interface FeatureContext {
+  recent: RecentRow[]
+  hourly: number
+  networks: number
+  fraudFlags: number
+  accountAgeHours: number
+}
+
+export interface FeatureBundle {
+  features: RiskFeatures
+  raw: Record<string, number | null>
+}
+
+/** Normalized 0-1 feature vector shared by every risk model, plus raw stats for auditing. */
+export function extractFeatures(ctx: FeatureContext): FeatureBundle {
+  const durations = ctx.recent.map((r) => r.duration_ms)
+  const viewables = ctx.recent.map((r) => r.viewable_pct)
+  const durationCv = cv(durations)
+  const viewabilityCv = cv(viewables)
+
+  const sorted = [...ctx.recent].sort((a, b) => a.served_at - b.served_at)
+  const gaps: number[] = []
+  for (let i = 1; i < sorted.length; i++) {
+    const g = sorted[i].served_at - sorted[i - 1].served_at
+    if (g > 0) gaps.push(g)
+  }
+  const gapCv = cv(gaps)
+
+  const features: RiskFeatures = {
+    regularity: gapCv === null ? 0.5 : clamp01(1 - gapCv / 0.5),
+    durationUniformity: durationCv === null ? 0.5 : clamp01(1 - durationCv / 0.4),
+    viewabilityUniformity: viewabilityCv === null ? 0.5 : clamp01(1 - viewabilityCv / 0.3),
+    rate: clamp01(ctx.hourly / config.caps.hourlyImpressions),
+    networkScore: clamp01(ctx.networks / config.tier2.vpnNetworksPerDev),
+    flagScore: clamp01(ctx.fraudFlags / 5),
+    youth: clamp01(1 - ctx.accountAgeHours / 24),
+  }
+
+  const raw: Record<string, number | null> = {
+    gapCv,
+    durationCv,
+    viewabilityCv,
+    hourlyRate: ctx.hourly,
+    networks: ctx.networks,
+  }
+
+  return { features, raw }
 }
 
 export interface ScoreContext {
@@ -39,7 +90,7 @@ export interface ScoreContext {
 }
 
 /**
- * Tier 3 risk model. Features are activity-shape statistics — never content.
+ * Tier 3 risk scoring. Features are activity-shape statistics — never content.
  * Returns a 0-100 score plus the rejection/review flags.
  */
 export async function scoreImpression(ctx: ScoreContext): Promise<ScoreResult> {
@@ -53,19 +104,6 @@ export async function scoreImpression(ctx: ScoreContext): Promise<ScoreResult> {
     "SELECT COUNT(*) AS n FROM impressions WHERE device_id = ? AND served_at > ?",
     [ctx.deviceId, now - 60 * 60 * 1000]
   )) as { n: number }
-
-  const durations = recent.map((r) => r.duration_ms)
-  const viewables = recent.map((r) => r.viewable_pct)
-  const durationCv = cv(durations)
-  const viewabilityCv = cv(viewables)
-
-  const sorted = [...recent].sort((a, b) => a.served_at - b.served_at)
-  const gaps: number[] = []
-  for (let i = 1; i < sorted.length; i++) {
-    const g = sorted[i].served_at - sorted[i - 1].served_at
-    if (g > 0) gaps.push(g)
-  }
-  const gapCv = cv(gaps)
 
   let networks = 0
   if (ctx.networkHash) {
@@ -88,43 +126,16 @@ export async function scoreImpression(ctx: ScoreContext): Promise<ScoreResult> {
     }
   }
 
-  const regularity = gapCv === null ? 0.5 : clamp01(1 - gapCv / 0.5)
-  const durationUniformity = durationCv === null ? 0.5 : clamp01(1 - durationCv / 0.4)
-  const viewabilityUniformity = viewabilityCv === null ? 0.5 : clamp01(1 - viewabilityCv / 0.3)
-  const rate = clamp01(hourly.n / config.caps.hourlyImpressions)
-  const networkScore = clamp01(networks / config.tier2.vpnNetworksPerDev)
-  const flagScore = clamp01(fraudFlags / 5)
-  const youth = clamp01(1 - accountAgeHours / 24)
-
-  const factors = {
-    regularity,
-    durationUniformity,
-    viewabilityUniformity,
-    rate,
-    networkScore,
-    flagScore,
-    youth,
-    gapCv,
-    durationCv,
-    hourlyRate: hourly.n,
-  }
-
-  const score = Math.round(
-    100 *
-      (0.2 * regularity +
-        0.15 * durationUniformity +
-        0.1 * viewabilityUniformity +
-        0.2 * rate +
-        0.1 * networkScore +
-        0.15 * flagScore +
-        0.1 * youth)
-  )
+  const { features, raw } = extractFeatures({ recent, hourly: hourly.n, networks, fraudFlags, accountAgeHours })
+  const model = getRiskModel()
+  const score = model.score(features)
 
   return {
     score,
+    model: model.name,
     reject: score >= config.tier3.highRisk,
     review: score >= config.tier3.review && score < config.tier3.highRisk,
-    factors,
+    factors: { ...features, ...raw },
   }
 }
 

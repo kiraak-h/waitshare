@@ -32,7 +32,43 @@ webhookRouter.post(
         const session = event.data.object as Stripe.Checkout.Session
         const campaignId = session.metadata?.campaignId
         if (campaignId && session.payment_status === "paid") {
-          await db.run("UPDATE campaigns SET status = 'active', updated_at = ? WHERE id = ?", [Date.now(), campaignId])
+          const paymentIntentId = typeof session.payment_intent === "string" ? session.payment_intent : null
+          await db.run(
+            "UPDATE campaigns SET status = 'active', stripe_checkout_id = ?, payment_intent_id = ?, updated_at = ? WHERE id = ?",
+            [session.id, paymentIntentId, Date.now(), campaignId]
+          )
+        }
+        break
+      }
+      case "charge.dispute.created": {
+        // A chargeback on an advertiser payment: stop the campaign immediately
+        // and record it in the fraud audit trail. The advertiser can dispute
+        // via the review queue before we ever bill impressions again.
+        const dispute = event.data.object as Stripe.Dispute
+        const paymentIntentId =
+          typeof dispute.payment_intent === "string" ? dispute.payment_intent : (dispute.charge as string) ?? null
+        const campaign = await db.get<{ id: string }>(
+          "SELECT id FROM campaigns WHERE payment_intent_id = ? OR stripe_checkout_id = ? LIMIT 1",
+          [paymentIntentId, paymentIntentId]
+        )
+        if (campaign) {
+          await db.run("UPDATE campaigns SET status = 'disputed', updated_at = ? WHERE id = ?", [Date.now(), campaign.id])
+          await db.run(
+            "INSERT INTO fraud_events (type, dev_id, device_id, network_hash, reason, created_at) VALUES ('chargeback', NULL, NULL, NULL, ?, ?)",
+            [`advertiser dispute ${dispute.id} on campaign ${campaign.id}`, Date.now()]
+          )
+        }
+        break
+      }
+      case "charge.refunded": {
+        const charge = event.data.object as Stripe.Charge
+        const paymentIntentId = typeof charge.payment_intent === "string" ? charge.payment_intent : null
+        const fullyRefunded = charge.refunded === true
+        if (fullyRefunded && paymentIntentId) {
+          await db.run("UPDATE campaigns SET status = 'refunded', updated_at = ? WHERE payment_intent_id = ?", [
+            Date.now(),
+            paymentIntentId,
+          ])
         }
         break
       }

@@ -33,8 +33,11 @@ Setup:
 
 - `STRIPE_MODE=live`, `STRIPE_SECRET_KEY` (secret key), `STRIPE_WEBHOOK_SECRET`.
 - Create webhook endpoints in the Stripe dashboard for `checkout.session.completed`,
-  `account.updated`, and `transfer.created`, all pointing at
-  `https://<host>/api/v1/webhooks`.
+  `account.updated`, `transfer.created`, `charge.dispute.created`, `charge.dispute.closed`,
+  and `charge.refunded`, all pointing at `https://<host>/api/v1/webhooks`.
+- Stripe Radar runs on every advertiser charge by default. Dispute/refund webhooks
+  transition the campaign to `disputed` / `refunded`, which stops delivery and records a
+  `chargeback` row in `fraud_events` for operator review.
 - Connect Express requires your platform account to be approved for payouts and
   (if operating in the EU) to be registered for OSS/VAT.
 
@@ -86,8 +89,9 @@ Supporting artifacts:
   DB to portable SQL: `node server/scripts/export-postgres.mjs dump.sql`, then
   `psql $DATABASE_URL -f dump.sql`.
 - The smoke suite runs against both drivers. Locally: `npm test -w server`
-  (SQLite) and `DATABASE_URL=... npm test -w server` (Postgres). CI runs a
-  dedicated Postgres job.
+  (SQLite) and `DATABASE_URL=... npm test -w server` (Postgres). Unit tests
+  (`npm run test:unit -w server`) cover the SQL translation layer and the
+  risk-scoring helpers. CI runs a dedicated Postgres job.
 
 ## 6. CI
 
@@ -117,3 +121,9 @@ instance with `SMOKE_BASE_URL=http://localhost:3001/api/v1`.
 - **Scaling.** Stateless API + stateful DB: put the SQLite file on persistent
   storage (single replica), or run with `DATABASE_URL` on managed Postgres for
   horizontal scale.
+- **Cloud-IP data licensing.** `server/assets/asn.json` is assembled from the
+  public cloud range files of AWS, Google, Microsoft, Oracle, and DigitalOcean
+  (plus optional RIPE announced prefixes). Each source's ToS governs use; the
+  dataset is for internal fraud/abuse classification only and is not redistributed
+  as a product. Regenerate with `npm run build:asn -w server`; CI can do so where
+  those providers are reachable.

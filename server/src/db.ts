@@ -71,6 +71,8 @@ CREATE TABLE IF NOT EXISTS campaigns (
   country_filter TEXT,
   delivery_speed TEXT NOT NULL DEFAULT 'fast',
   status TEXT NOT NULL DEFAULT 'active',
+  stripe_checkout_id TEXT,
+  payment_intent_id TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -188,6 +190,8 @@ class SqliteDriver implements DbDriver {
     ensureColumnSq(raw, "impressions", "ip_hash", "ip_hash TEXT")
     ensureColumnSq(raw, "serves", "network_hash", "network_hash TEXT")
     ensureColumnSq(raw, "payouts", "available_at", "available_at INTEGER")
+    ensureColumnSq(raw, "campaigns", "stripe_checkout_id", "stripe_checkout_id TEXT")
+    ensureColumnSq(raw, "campaigns", "payment_intent_id", "payment_intent_id TEXT")
   }
 
   private require(): Database.Database {
@@ -221,7 +225,7 @@ class SqliteDriver implements DbDriver {
 pg.types.setTypeParser(20, (v) => Number(v))
 pg.types.setTypeParser(16, (v) => (v === "true" ? 1 : 0))
 
-function toPgSql(sql: string): string {
+export function toPgSql(sql: string): string {
   let i = 0
   return sql.replace(/\?/g, () => `$${++i}`)
 }
