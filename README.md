@@ -12,7 +12,8 @@ Get paid for waiting. A privacy-first, transparent ad marketplace for AI coding 
 - **Transparent.** Every campaign, CPM, impression count, and dev payout is on a public ledger.
 
 See `docs/ARCHITECTURE.md` for design decisions, `docs/FRAUD.md` for the fraud-detection
-strategy, and `docs/COMPLIANCE.md` for money rails and tax/compliance.
+strategy, `docs/COMPLIANCE.md` for money rails and tax/compliance, and
+`docs/PRODUCTION.md` for the deployment guide.
 
 ## Layout
 
@@ -151,6 +152,22 @@ Client updates are integrity-protected end-to-end:
    opencode plugin logs a verified-update notice on load. Any manifest or artifact that fails
    verification is refused.
 
+## Production readiness
+
+- **Configuration** — all knobs documented in `.env.example`; the server validates its
+  configuration at startup (hard errors for `STRIPE_MODE=live` without a key, warnings for
+  production defaults like demo seeding or localhost base URLs).
+- **Payments / OAuth** — `STRIPE_MODE=stub` exercises the full marketplace without keys; set
+  `STRIPE_MODE=live` with real `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` and
+  `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` to go live.
+- **CI** — `.github/workflows/ci.yml` typechecks, builds, and runs a self-contained smoke test
+  (`npm test -w server`) that spawns the server on a temp data dir and drives
+  auth → device key → campaign → serve → signed impression → payout → updates end to end.
+- **Relational DB** — `server/migrations/001_init.sql` is the authoritative Postgres DDL, and
+  `server/scripts/export-postgres.mjs` dumps SQLite data to portable SQL. An async data-access
+  layer is the remaining step for running natively on Postgres.
+- See `docs/PRODUCTION.md` for the full deployment guide.
+
 ## Security notes
 
 - Device keys are generated client-side; the server stores only the public key.
@@ -164,4 +181,4 @@ Client updates are integrity-protected end-to-end:
 
 - ASN/DC reputation: supply a GeoLite2 dataset behind the `classifyNetwork()` hook and enforce it.
 - ML scoring ensemble (Tier 3) + graduated trust with a human review queue.
-- Relational database for production scale; real Stripe/Google credentials; CI pipeline.
+- Async data-access layer to run natively on Postgres (schema + export tooling already ship).

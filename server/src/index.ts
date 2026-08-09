@@ -1,6 +1,6 @@
 import express from "express"
 import cors from "cors"
-import { config } from "./config.js"
+import { config, validateConfig } from "./config.js"
 import { db } from "./db.js"
 import { authRouter } from "./routes/auth.js"
 import { oauthRouter } from "./routes/oauth.js"
@@ -17,6 +17,17 @@ import { randomUUID } from "node:crypto"
 
 const app = express()
 app.use(cors())
+
+const report = validateConfig()
+for (const w of report.warnings) {
+  console.warn(`[waitshare] config warning: ${w}`)
+}
+if (report.errors.length > 0) {
+  for (const e of report.errors) {
+    console.error(`[waitshare] config error: ${e}`)
+  }
+  throw new Error(`invalid configuration: ${report.errors.join("; ")}`)
+}
 app.use("/api/v1/webhooks", express.raw({ type: "application/json" }), webhookRouter)
 app.use(express.json())
 

@@ -1,0 +1,164 @@
+import { spawn } from "node:child_process"
+import os from "node:os"
+import path from "node:path"
+import fs from "node:fs"
+import crypto from "node:crypto"
+import { fileURLToPath } from "node:url"
+
+const serverDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
+
+async function api(base, p, opts = {}) {
+  const res = await fetch(base + p, {
+    ...opts,
+    headers: { "content-type": "application/json", ...(opts.headers || {}) },
+  })
+  let body = null
+  try {
+    body = await res.json()
+  } catch {}
+  return { status: res.status, body }
+}
+
+function sign(payload, privateKeyB64) {
+  const key = crypto.createPrivateKey({ key: Buffer.from(privateKeyB64, "base64"), format: "der", type: "pkcs8" })
+  return crypto.sign(null, Buffer.from(JSON.stringify(payload)), key).toString("base64")
+}
+
+function sha256hex(s) {
+  return crypto.createHash("sha256").update(s).digest("hex")
+}
+
+const results = []
+function record(name, pass, detail = "") {
+  results.push({ name, pass })
+  console.log(`${pass ? "PASS" : "FAIL"}  ${name}${detail ? `  (${detail})` : ""}`)
+}
+
+let child = null
+let base = process.env.SMOKE_BASE_URL
+let dataDir = null
+
+if (!base) {
+  dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "waitshare-smoke-"))
+  const port = Number(process.env.SMOKE_PORT ?? 3999)
+  base = `http://localhost:${port}/api/v1`
+  child = spawn(process.execPath, ["--import", "tsx", "src/index.ts"], {
+    cwd: serverDir,
+    env: {
+      ...process.env,
+      PORT: String(port),
+      DATA_DIR: dataDir,
+      SEED_DEMO: "0",
+      STRIPE_MODE: "stub",
+      PAYMENT_THRESHOLD_CENTS: "1",
+      ADMIN_TOKEN: "smoke-admin-token",
+    },
+    stdio: "ignore",
+  })
+
+  let healthy = false
+  for (let i = 0; i < 40; i++) {
+    await new Promise((r) => setTimeout(r, 250))
+    try {
+      const r = await fetch(base + "/health")
+      if (r.ok) {
+        healthy = true
+        break
+      }
+    } catch {}
+  }
+  if (!healthy) {
+    console.error("FAIL  smoke: server did not become healthy")
+    child.kill()
+    process.exit(1)
+  }
+}
+
+try {
+  const health = await api(base, "/health")
+  record("smoke: health endpoint", health.status === 200 && health.body.ok === true)
+
+  const reg = await api(base, "/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ email: `smoke-${Date.now()}@test.dev`, country: "US" }),
+  })
+  record("smoke: register dev", reg.status === 200 && Boolean(reg.body.token), reg.status)
+  const token = reg.body.token
+  const devId = reg.body.devId
+
+  const device = await api(base, "/auth/device", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  })
+  record("smoke: register device + keypair", device.status === 200 && Boolean(device.body.deviceId && device.body.privateKey), device.status)
+  const deviceId = device.body.deviceId
+  const privKey = device.body.privateKey
+
+  const campaign = await api(base, "/advertiser/campaigns", {
+    method: "POST",
+    body: JSON.stringify({
+      email: `smoke-adv-${Date.now()}@test.dev`,
+      adLine: "Smoke test campaign",
+      url: "https://example.com",
+      surface: "opencode",
+      cpmCents: 300,
+      blocks: 10,
+      deliverySpeed: "fast",
+    }),
+  })
+  record("smoke: create campaign", campaign.status === 200 && Boolean(campaign.body.campaignId) && campaign.body.mode === "stub", campaign.status)
+  const campaignId = campaign.body.campaignId
+
+  const confirmed = await api(base, `/advertiser/campaigns/${campaignId}/confirm`, { method: "POST" })
+  record("smoke: confirm campaign", confirmed.status === 200 && confirmed.body.status === "active", confirmed.status)
+
+  const next = await api(base, `/ads/next?surface=opencode&deviceId=${deviceId}`)
+  record("smoke: serve issued", next.status === 200 && Boolean(next.body.ad?.serveId && next.body.ad?.nonce), next.status)
+
+  const canonical = { serveId: next.body.ad.serveId, deviceId, durationMs: 11000, viewablePct: 100, focusPct: 100, nonce: next.body.ad.nonce, ts: Date.now() }
+
+  const tampered = await api(base, "/ads/impressions", {
+    method: "POST",
+    body: JSON.stringify({ ...canonical, durationMs: 9999, signature: sign(canonical, privKey) }),
+  })
+  record("smoke: tampered impression rejected (401)", tampered.status === 401, `${tampered.status} ${tampered.body?.error ?? ""}`)
+
+  const shortSigned = { ...canonical, durationMs: 5000, signature: sign({ ...canonical, durationMs: 5000 }, privKey) }
+  const shortRes = await api(base, "/ads/impressions", { method: "POST", body: JSON.stringify(shortSigned) })
+  record("smoke: sub-min duration rejected (422)", shortRes.status === 422 && shortRes.body.reason === "duration below minimum", `${shortRes.status} ${shortRes.body?.reason ?? ""}`)
+
+  const next2 = await api(base, `/ads/next?surface=opencode&deviceId=${deviceId}`)
+  const canonical2 = { serveId: next2.body.ad.serveId, deviceId, durationMs: 11000, viewablePct: 100, focusPct: 100, nonce: next2.body.ad.nonce, ts: Date.now() }
+  const honest = await api(base, "/ads/impressions", {
+    method: "POST",
+    body: JSON.stringify({ ...canonical2, signature: sign(canonical2, privKey) }),
+  })
+  record("smoke: honest impression credited", honest.status === 200 && honest.body.credited === true && honest.body.devShareMills === 180, `${honest.status} ${JSON.stringify(honest.body)}`)
+
+  const me = await api(base, "/dev/me", { headers: { authorization: `Bearer ${token}` } })
+  record("smoke: dev balance reflects credit", me.status === 200 && me.body.dev.balanceCents >= 1, `${me.status} balanceCents=${me.body.dev?.balanceCents}`)
+
+  const payout = await api(base, "/dev/payout", { method: "POST", headers: { authorization: `Bearer ${token}` } })
+  record("smoke: payout enters held", payout.status === 200 && payout.body.status === "held" && payout.body.amountMills > 0, `${payout.status} ${JSON.stringify(payout.body)}`)
+
+  const updKey = await api(base, "/updates/key")
+  record("smoke: update public key exposed", updKey.status === 200 && Boolean(updKey.body.publicKey), updKey.status)
+
+  const updLatest = await api(base, "/updates/latest?platform=opencode&version=0.1.0")
+  record("smoke: update latest responds (no manifest yet)", updLatest.status === 200 && updLatest.body.latest === null, `${updLatest.status} ${JSON.stringify(updLatest.body)}`)
+
+  const split = await api(base, "/split/")
+  record("smoke: split contract locked 60/40", split.status === 200 && split.body.split.devShare === 60 && split.body.split.platformShare === 40, `${split.status} ${JSON.stringify(split.body)}`)
+
+  const total = results.length
+  const passed = results.filter((r) => r.pass).length
+  console.log(`\n${passed}/${total} passed`)
+  process.exitCode = passed === total ? 0 : 1
+} catch (err) {
+  console.error("smoke error:", err)
+  process.exitCode = 1
+} finally {
+  if (child) {
+    child.kill()
+  }
+}

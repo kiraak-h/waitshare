@@ -1,6 +1,43 @@
 import path from "node:path"
 import fs from "node:fs"
 
+export const nodeEnv = process.env.NODE_ENV ?? "development"
+export const isProduction = nodeEnv === "production"
+
+export interface ConfigReport {
+  errors: string[]
+  warnings: string[]
+}
+
+export function validateConfig(): ConfigReport {
+  const errors: string[] = []
+  const warnings: string[] = []
+
+  if (config.stripeMode === "live" && !config.stripeSecretKey) {
+    errors.push("STRIPE_MODE=live requires STRIPE_SECRET_KEY")
+  }
+  if (config.stripeMode === "live" && !config.stripeWebhookSecret) {
+    warnings.push("STRIPE_MODE=live: set STRIPE_WEBHOOK_SECRET to verify webhook signatures")
+  }
+  if (Boolean(config.googleClientId) !== Boolean(config.googleClientSecret)) {
+    warnings.push("Google OAuth is misconfigured: set both GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET")
+  }
+  if (isProduction && process.env.SEED_DEMO !== "0") {
+    warnings.push("NODE_ENV=production: set SEED_DEMO=0 to disable demo data seeding")
+  }
+  if (isProduction && config.publicBaseUrl.startsWith("http://localhost")) {
+    warnings.push(`NODE_ENV=production: PUBLIC_BASE_URL is still the default (${config.publicBaseUrl})`)
+  }
+  if (isProduction && config.webBaseUrl.startsWith("http://localhost")) {
+    warnings.push(`NODE_ENV=production: WEB_BASE_URL is still the default (${config.webBaseUrl})`)
+  }
+  if (isProduction && config.dataDir.includes("/workspace")) {
+    warnings.push("NODE_ENV=production: DATA_DIR points into the workspace checkout")
+  }
+
+  return { errors, warnings }
+}
+
 export const config = {
   port: Number(process.env.PORT ?? 3001),
   host: process.env.HOST ?? "0.0.0.0",
