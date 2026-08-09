@@ -61,10 +61,23 @@ export const config = {
   minGapMs: Number(process.env.MIN_GAP_MS ?? 0),
   maxPendingServes: Number(process.env.MAX_PENDING_SERVES ?? 2),
   fraudSalt: process.env.FRAUD_SALT ?? "",
+  asnDbPath: process.env.ASN_DB_PATH ?? "",
   tier2: {
     farmDevsPerNetwork: Number(process.env.TIER2_FARM_DEVS ?? 5),
     vpnNetworksPerDev: Number(process.env.TIER2_VPN_NETWORKS ?? 3),
     windowMs: Number(process.env.TIER2_WINDOW_MS ?? 24 * 60 * 60 * 1000),
+    dcEnforce: process.env.TIER2_DC_ENFORCE !== "0",
+  },
+  tier3: {
+    highRisk: Number(process.env.TIER3_HIGH_RISK ?? 75),
+    review: Number(process.env.TIER3_REVIEW ?? 55),
+    establishedImpressions: Number(process.env.TRUST_ESTABLISHED_IMPRESSIONS ?? 50),
+    establishedDays: Number(process.env.TRUST_ESTABLISHED_DAYS ?? 7),
+    trustedImpressions: Number(process.env.TRUST_TRUSTED_IMPRESSIONS ?? 2000),
+    trustedDays: Number(process.env.TRUST_TRUSTED_DAYS ?? 30),
+    tier0HourlyCap: Number(process.env.TIER0_CAP_HOURLY ?? 20),
+    tier0DailyCap: Number(process.env.TIER0_CAP_DAILY ?? 100),
+    tier0PayoutCapCents: Number(process.env.TIER0_PAYOUT_CAP_CENTS ?? 10000),
   },
   serveTtlMs: Number(process.env.SERVE_TTL_MS ?? 90_000),
   caps: {

@@ -7,10 +7,13 @@ export interface SplitContract {
   lockedAt: number
 }
 
-export function getSplitContract(): SplitContract {
-  const row = db
-    .prepare("SELECT dev_share, platform_share, version, locked_at FROM split_contract WHERE id = 1")
-    .get() as { dev_share: number; platform_share: number; version: number; locked_at: number }
+export async function getSplitContract(): Promise<SplitContract> {
+  const row = (await db.get("SELECT dev_share, platform_share, version, locked_at FROM split_contract WHERE id = 1")) as {
+    dev_share: number
+    platform_share: number
+    version: number
+    locked_at: number
+  }
   return {
     devShare: row.dev_share,
     platformShare: row.platform_share,
@@ -19,13 +22,13 @@ export function getSplitContract(): SplitContract {
   }
 }
 
-export function devShareMills(grossMills: number): number {
-  const { devShare } = getSplitContract()
+export async function devShareMills(grossMills: number): Promise<number> {
+  const { devShare } = await getSplitContract()
   return Math.floor((grossMills * devShare) / 100)
 }
 
-export function platformShareMills(grossMills: number): number {
-  const { platformShare } = getSplitContract()
+export async function platformShareMills(grossMills: number): Promise<number> {
+  const { platformShare } = await getSplitContract()
   return Math.floor((grossMills * platformShare) / 100)
 }
 

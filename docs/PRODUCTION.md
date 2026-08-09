@@ -62,23 +62,32 @@ email sign-in demo fallback remains.
 - Empty `ADMIN_TOKEN` means publishing is disabled (safe default; clients still
   fetch manifests but nothing can be published).
 
-## 5. Relational database (Postgres) — current status
+## 5. Relational database (Postgres) — implemented
 
-The dev server persists to **better-sqlite3** (synchronous, file-backed, zero ops).
-The relational-DB path ships as:
+The server has two native storage drivers behind one async data-access layer
+(`server/src/db.ts`):
 
-- `server/migrations/001_init.sql` — authoritative Postgres DDL (same tables,
-  columns, and integer-mills conventions as SQLite, plus indexes for the hot
-  query paths and the seeded 60/40 split contract).
-- `server/scripts/export-postgres.mjs` — dumps the SQLite DB to portable SQL:
-  `node server/scripts/export-postgres.mjs dump.sql`, then
+- **SQLite** (default, dev): `better-sqlite3`, synchronous, file-backed, zero ops.
+  Data lives under `DATA_DIR`.
+- **Postgres** (production): `pg`, async. Activate by setting `DATABASE_URL` —
+  e.g. `DATABASE_URL=postgres://user:pass@host:5432/waitshare`. The driver loads
+  `server/migrations/001_init.sql` at startup (idempotent DDL + indexes + the
+  seeded 60/40 split contract); `PG_SCHEMA_PATH` overrides the schema file.
+
+The schema and the SQL the app runs are identical across both drivers; the
+Postgres driver translates positional `?` placeholders to `$n`. Timestamps are
+epoch-millisecond `BIGINT`, ids are app-generated UUID/TEXT, and money is integer
+mills — never floats.
+
+Supporting artifacts:
+
+- `server/migrations/001_init.sql` — authoritative Postgres DDL.
+- `server/scripts/export-postgres.mjs` — one-time migration of an existing SQLite
+  DB to portable SQL: `node server/scripts/export-postgres.mjs dump.sql`, then
   `psql $DATABASE_URL -f dump.sql`.
-
-Remaining work before the server can run natively on Postgres: introduce an async
-data-access layer behind the current `server/src/db.ts` interface and port the
-call sites (routes/services) from synchronous `db.prepare(...).get/all/run` to
-awaited queries. The smoke suite (`npm test -w server`) is the regression net for
-that swap. `001_init.sql` is the contract the provider must satisfy.
+- The smoke suite runs against both drivers. Locally: `npm test -w server`
+  (SQLite) and `DATABASE_URL=... npm test -w server` (Postgres). CI runs a
+  dedicated Postgres job.
 
 ## 6. CI
 
@@ -86,7 +95,10 @@ that swap. `001_init.sql` is the contract the provider must satisfy.
 
 - `server` job: `npm ci`, typecheck, build, then `npm test -w server`
   (self-contained smoke test — spawns the server on a temp data dir and exercises
-  auth → device key → campaign → serve → signed impression → payout → updates).
+  auth → device key → campaign → serve → signed impression → payout → updates →
+  tier-2/3 fraud signals → admin review).
+- `server-postgres` job: same smoke test against a `postgres:15` service
+  container via `DATABASE_URL`.
 - `web` job: `npm ci`, typecheck, build.
 
 The smoke test also runs locally: `npm test -w server`, or against a running
@@ -103,4 +115,5 @@ instance with `SMOKE_BASE_URL=http://localhost:3001/api/v1`.
   fraud-hashing salt. Back it up; losing it invalidates update signatures and
   fleet-detection history.
 - **Scaling.** Stateless API + stateful DB: put the SQLite file on persistent
-  storage (single replica), or complete the Postgres swap for horizontal scale.
+  storage (single replica), or run with `DATABASE_URL` on managed Postgres for
+  horizontal scale.

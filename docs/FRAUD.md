@@ -42,7 +42,7 @@ Stops drive-by abuse; does not stop organized abuse, but every higher layer depe
   (`MAX_PENDING_SERVES`) that stops serve hoarding, and optional inter-impression spacing
   (`MIN_GAP_MS`) — all env-tunable. The auction also avoids serving the same campaign twice in a row.
 
-### Layer 1 — Behavioral heuristics `[PARTIAL, TUNE]`
+### Layer 1 — Behavioral heuristics `[IMPLEMENTED]`
 
 Cheap and high-coverage. Core signal plumbing is shipped; tune thresholds from real abuse data.
 
@@ -52,10 +52,11 @@ Cheap and high-coverage. Core signal plumbing is shipped; tune thresholds from r
 - **Focus/occlusion signals `[IMPLEMENTED]`.** Impressions carry a `focusPct` (share of duration
   the surface was focused/visible). The VSCode surface measures it via window-focus events; other
   surfaces report 100 until they can measure. Server stores it and can gate on `MIN_FOCUS_PCT`.
-- **Inter-arrival distribution `[PLANNED]`.** Real prompts are bursty and human-shaped; bots are
-  suspiciously regular. Track request cadence per device/account; flag machines.
-- **Duration shape `[PLANNED]`.** Real thinking times cluster realistically. Synthetic traffic is
-  unnaturally uniform or parked exactly at the cap (e.g., always 10.0–11.0s).
+- **Inter-arrival distribution `[IMPLEMENTED]`.** Gap-coefficient-of-variation feeds the Tier 3
+  risk model: real prompts are bursty and human-shaped, bots are suspiciously regular
+  (`server/src/services/scoring.ts`).
+- **Duration shape `[IMPLEMENTED]`.** Duration- and viewability-CV feed the Tier 3 risk model;
+  synthetic traffic that is unnaturally uniform or parked exactly at the cap scores higher risk.
 
 ### Layer 2 — Graph & network intelligence `[PARTIALLY IMPLEMENTED]`
 
@@ -70,10 +71,11 @@ This is the layer that catches collusion. Per-device rules cannot see a farm; gr
   within the window.
 - **IP binding `[IMPLEMENTED]`.** A serve is bound to the network that issued it; an impression
   submitted from a different masked network is rejected (403) and the serve is voided.
-- **IP/ASN reputation `[HOOK, PLANNED]`.** `server/src/services/network.ts` exposes a
-  `classifyNetwork(ip)` hook returning `datacenter | residential | unknown`. Ship a GeoLite2-ASN
-  (or similar) dataset behind it to flag DC/VPS/proxy ranges; without one it stays `unknown` and
-  is not enforced.
+- **IP/ASN reputation `[IMPLEMENTED]`.** `server/src/services/asn.ts` classifies IPs as
+  `datacenter | residential | unknown` against a bundled AWS + DigitalOcean range dataset
+  (`server/assets/asn.json`, binary-search lookup, IPv4 + IPv6). With `TIER2_DC_ENFORCE` on
+  (default), serves are withheld from datacenter/cloud networks and a `tier2-dc` event is logged.
+  `ASN_DB_PATH` overrides the dataset; unmatched IPs classify `residential` (conservative).
 - **Audit trail `[IMPLEMENTED]`.** Farm/VPN rejections and impression-time fleet rejections are
   recorded to the `fraud_events` table (deduped per dev+network per window) and increment
   `devs.fraud_flags`.
@@ -82,14 +84,21 @@ This is the layer that catches collusion. Per-device rules cannot see a farm; gr
   SHA-256 hashed. Only the hashes are persisted — matching the ToS: IPs are processed
   transiently, never stored raw.
 
-### Layer 3 — ML scoring + payout holds `[PARTIAL]`
+### Layer 3 — Risk scoring + payout holds `[IMPLEMENTED]`
 
 Where money is actually protected.
 
-- Score every impression with an ensemble:
-  - unsupervised anomaly detection on features (impressions/hr, session length, viewability
-    rate, CPM-weighted earnings, inter-arrival stats);
-  - supervised model trained on manually-labeled fraud from the review queue.
+- **Deterministic risk score `[IMPLEMENTED]`.** Every impression is scored 0–100
+  (`server/src/services/scoring.ts`) from activity-shape statistics — regularity, duration and
+  viewability uniformity, request rate, network rotation, fraud flags, and account youth. No
+  content factors, ever. Score ≥ `TIER3_HIGH_RISK` (75) rejects and increments `fraud_flags`;
+  ≥ `TIER3_REVIEW` (55) logs a review event. The feature set is the v0 of the planned ML
+  ensemble; swap in a supervised model behind the same `scoreImpression()` interface later.
+- **Graduated trust `[IMPLEMENTED]`.** `computeTrustTier()` derives `0 = new`, `1 = established`
+  (≥ 50 impressions / 7 days), `2 = trusted` (≥ 2000 impressions / 30 days, zero flags). Trust
+  tier 0 gets reduced hourly/daily caps (`TIER0_CAP_*`) and a single-payout cap
+  (`TIER0_PAYOUT_CAP_CENTS`) enforced in `/dev/payout`; serve is gated on `status = active`.
+  Admin review can clear/review/suspend via `/api/v1/admin/review`.
 - **Payout clearing window `[IMPLEMENTED]`.** Payouts start `held` for `PAYOUT_HOLD_MS` (default
   72h) before the transfer is created; the dev's available balance is zeroed at request and the
   held amount lives in the `payouts` table. A sweeper (`server/src/services/payouts.ts`) advances
@@ -97,8 +106,6 @@ Where money is actually protected.
 - **Reserve buffer `[IMPLEMENTED]`.** `RESERVE_PCT` (default 10%) of each dev share is held in
   `devs.reserve_mills` at credit time and released back to the available balance after
   `RESERVE_RELEASE_MS` (default 30 days) via the same sweeper.
-- **Graduated trust.** New accounts get low caps and human review before large payouts;
-  established honest accounts get the benefit of the doubt.
 
 ### Layer 4 — Human review & advertiser protection `[IMPLEMENTED BASELINE, EXPAND]`
 
@@ -140,10 +147,12 @@ only salted hashes and aggregates. GDPR legitimate-interest basis for anti-fraud
    plumbing, quality thresholds, env-tunable caps. Ship and collect baseline distributions.
 2. **Tier 1 (`[DONE]`)** — challenge nonce, focus flag, pending-serve cap, inter-impression spacing.
    Remaining: tune the inter-arrival and duration-shape detectors from real data.
-3. **Tier 2 (`[PARTIALLY IMPLEMENTED]`)** — graph + IP/ASN reputation: farm, VPN-rotation, and IP
-   binding detection are live behind env-tunable thresholds; ASN reputation is a hook awaiting a
-   GeoLite2 dataset. Payout clearing window and reserve buffer are already implemented.
-4. **Tier 3** — ML scoring ensemble; graduated trust; automated blocking with human review queue.
+3. **Tier 2 (`[IMPLEMENTED]`)** — graph + IP/ASN reputation: farm, VPN-rotation, IP-binding, and
+   datacenter-network detection are live behind env-tunable thresholds, with the bundled ASN
+   dataset. Payout clearing window and reserve buffer are also implemented.
+4. **Tier 3 (`[IMPLEMENTED]`)** — deterministic risk scoring, graduated trust tiers with
+   per-tier caps and payout gates, and an admin review queue (clear/review/suspend). The
+   supervised-ML scoring ensemble replaces `scoreImpression()` behind the same interface.
 
 Every tier is additive and doesn't change the impression contract, so honest clients keep
 working unchanged.

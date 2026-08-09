@@ -1,12 +1,24 @@
+import fs from "node:fs"
+import path from "node:path"
+import pg from "pg"
 import Database from "better-sqlite3"
-import { ensureDataDir } from "./config.js"
+import { config, ensureDataDir } from "./config.js"
 
-const dataDir = ensureDataDir()
-const db = new Database(`${dataDir}/waitshare.db`)
-db.pragma("journal_mode = WAL")
-db.pragma("foreign_keys = ON")
+export interface RunResult {
+  changes: number
+}
 
-db.exec(`
+export interface DbDriver {
+  readonly kind: "sqlite" | "postgres"
+  init(): Promise<void>
+  get<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T | undefined>
+  all<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]>
+  run(sql: string, params?: unknown[]): Promise<RunResult>
+  exec(sql: string): Promise<void>
+  close(): Promise<void>
+}
+
+const SQLITE_DDL = `
 CREATE TABLE IF NOT EXISTS devs (
   id TEXT PRIMARY KEY,
   email TEXT UNIQUE,
@@ -20,6 +32,7 @@ CREATE TABLE IF NOT EXISTS devs (
   stripe_account_id TEXT,
   stripe_onboarded INTEGER NOT NULL DEFAULT 0,
   fraud_flags INTEGER NOT NULL DEFAULT 0,
+  trust_tier INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL
 );
 
@@ -137,44 +150,158 @@ CREATE TABLE IF NOT EXISTS split_contract (
   version INTEGER NOT NULL,
   locked_at INTEGER NOT NULL
 );
-`)
+`
 
-const contractExists = db.prepare("SELECT id FROM split_contract WHERE id = 1").get()
-if (!contractExists) {
-  db.prepare(
-    "INSERT INTO split_contract (id, dev_share, platform_share, version, locked_at) VALUES (1, 60, 40, 1, ?)"
-  ).run(Date.now())
-}
-
-function ensureColumn(table: string, column: string, ddl: string): void {
-  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
+function ensureColumnSq(raw: Database.Database, table: string, column: string, ddl: string): void {
+  const cols = raw.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
   if (!cols.some((c) => c.name === column)) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`)
+    raw.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`)
   }
 }
 
-ensureColumn("serves", "nonce", "nonce TEXT")
-ensureColumn("impressions", "nonce", "nonce TEXT")
-ensureColumn("impressions", "focus_pct", "focus_pct INTEGER NOT NULL DEFAULT 100")
-ensureColumn("devs", "reserve_mills", "reserve_mills INTEGER NOT NULL DEFAULT 0")
-ensureColumn("devs", "fraud_flags", "fraud_flags INTEGER NOT NULL DEFAULT 0")
-ensureColumn("impressions", "reserved_mills", "reserved_mills INTEGER NOT NULL DEFAULT 0")
-ensureColumn("impressions", "reserve_released_at", "reserve_released_at INTEGER")
-ensureColumn("impressions", "network_hash", "network_hash TEXT")
-ensureColumn("impressions", "ip_hash", "ip_hash TEXT")
-ensureColumn("serves", "network_hash", "network_hash TEXT")
-ensureColumn("payouts", "available_at", "available_at INTEGER")
+class SqliteDriver implements DbDriver {
+  readonly kind = "sqlite" as const
+  private raw: Database.Database | null = null
 
-db.exec(`
-CREATE TABLE IF NOT EXISTS fraud_events (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  type TEXT NOT NULL,
-  dev_id TEXT,
-  device_id TEXT,
-  network_hash TEXT,
-  reason TEXT NOT NULL,
-  created_at INTEGER NOT NULL
-);
-`)
+  async init(): Promise<void> {
+    const dataDir = ensureDataDir()
+    const raw = new Database(`${dataDir}/waitshare.db`)
+    raw.pragma("journal_mode = WAL")
+    raw.pragma("foreign_keys = ON")
+    raw.exec(SQLITE_DDL)
+    this.raw = raw
 
-export { db }
+    const contractExists = raw.prepare("SELECT id FROM split_contract WHERE id = 1").get()
+    if (!contractExists) {
+      raw.prepare("INSERT INTO split_contract (id, dev_share, platform_share, version, locked_at) VALUES (1, 60, 40, 1, ?)").run(Date.now())
+    }
+
+    ensureColumnSq(raw, "serves", "nonce", "nonce TEXT")
+    ensureColumnSq(raw, "impressions", "nonce", "nonce TEXT")
+    ensureColumnSq(raw, "impressions", "focus_pct", "focus_pct INTEGER NOT NULL DEFAULT 100")
+    ensureColumnSq(raw, "devs", "reserve_mills", "reserve_mills INTEGER NOT NULL DEFAULT 0")
+    ensureColumnSq(raw, "devs", "fraud_flags", "fraud_flags INTEGER NOT NULL DEFAULT 0")
+    ensureColumnSq(raw, "devs", "trust_tier", "trust_tier INTEGER NOT NULL DEFAULT 0")
+    ensureColumnSq(raw, "impressions", "reserved_mills", "reserved_mills INTEGER NOT NULL DEFAULT 0")
+    ensureColumnSq(raw, "impressions", "reserve_released_at", "reserve_released_at INTEGER")
+    ensureColumnSq(raw, "impressions", "network_hash", "network_hash TEXT")
+    ensureColumnSq(raw, "impressions", "ip_hash", "ip_hash TEXT")
+    ensureColumnSq(raw, "serves", "network_hash", "network_hash TEXT")
+    ensureColumnSq(raw, "payouts", "available_at", "available_at INTEGER")
+  }
+
+  private require(): Database.Database {
+    if (!this.raw) throw new Error("database not initialized")
+    return this.raw
+  }
+
+  async get<T>(sql: string, params?: unknown[]): Promise<T | undefined> {
+    return this.require().prepare(sql).get(...(params ?? [])) as T | undefined
+  }
+
+  async all<T>(sql: string, params?: unknown[]): Promise<T[]> {
+    return this.require().prepare(sql).all(...(params ?? [])) as T[]
+  }
+
+  async run(sql: string, params?: unknown[]): Promise<RunResult> {
+    const info = this.require().prepare(sql).run(...(params ?? []))
+    return { changes: info.changes }
+  }
+
+  async exec(sql: string): Promise<void> {
+    this.require().exec(sql)
+  }
+
+  async close(): Promise<void> {
+    this.raw?.close()
+    this.raw = null
+  }
+}
+
+pg.types.setTypeParser(20, (v) => Number(v))
+pg.types.setTypeParser(16, (v) => (v === "true" ? 1 : 0))
+
+function toPgSql(sql: string): string {
+  let i = 0
+  return sql.replace(/\?/g, () => `$${++i}`)
+}
+
+function postgresSchemaPath(): string {
+  return path.resolve(import.meta.dirname, "../migrations/001_init.sql")
+}
+
+class PostgresDriver implements DbDriver {
+  readonly kind = "postgres" as const
+  private pool: pg.Pool | null = null
+  private url: string
+
+  constructor(url: string) {
+    this.url = url
+  }
+
+  async init(): Promise<void> {
+    const pool = new pg.Pool({ connectionString: this.url, max: 10 })
+    this.pool = pool
+    const schemaPath = process.env.PG_SCHEMA_PATH || postgresSchemaPath()
+    if (fs.existsSync(schemaPath)) {
+      const ddl = fs.readFileSync(schemaPath, "utf8")
+      await pool.query(ddl)
+    }
+  }
+
+  private require(): pg.Pool {
+    if (!this.pool) throw new Error("database not initialized")
+    return this.pool
+  }
+
+  async get<T>(sql: string, params?: unknown[]): Promise<T | undefined> {
+    const res = await this.require().query(toPgSql(sql), params ?? [])
+    return res.rows[0] as T | undefined
+  }
+
+  async all<T>(sql: string, params?: unknown[]): Promise<T[]> {
+    const res = await this.require().query(toPgSql(sql), params ?? [])
+    return res.rows as T[]
+  }
+
+  async run(sql: string, params?: unknown[]): Promise<RunResult> {
+    const res = await this.require().query(toPgSql(sql), params ?? [])
+    return { changes: res.rowCount ?? 0 }
+  }
+
+  async exec(sql: string): Promise<void> {
+    await this.require().query(sql)
+  }
+
+  async close(): Promise<void> {
+    await this.pool?.end()
+    this.pool = null
+  }
+}
+
+const databaseUrl = process.env.DATABASE_URL
+export const dbKind: "sqlite" | "postgres" = databaseUrl ? "postgres" : "sqlite"
+export const driver: DbDriver = databaseUrl ? new PostgresDriver(databaseUrl) : new SqliteDriver()
+
+let ready: Promise<void> | null = null
+
+export function initDb(): Promise<void> {
+  if (!ready) {
+    ready = driver.init()
+  }
+  return ready
+}
+
+async function withReady<T>(fn: () => Promise<T>): Promise<T> {
+  await initDb()
+  return fn()
+}
+
+export const db = {
+  kind: dbKind,
+  get: <T>(sql: string, params?: unknown[]) => withReady(() => driver.get<T>(sql, params)),
+  all: <T>(sql: string, params?: unknown[]) => withReady(() => driver.all<T>(sql, params)),
+  run: (sql: string, params?: unknown[]) => withReady(() => driver.run(sql, params)),
+  exec: (sql: string) => withReady(() => driver.exec(sql)),
+  close: () => driver.close(),
+}

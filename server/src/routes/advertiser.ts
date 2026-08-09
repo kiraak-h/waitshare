@@ -3,6 +3,7 @@ import { z } from "zod"
 import { db } from "../db.js"
 import { payments } from "../services/payments.js"
 import { config } from "../config.js"
+import { asyncHandler } from "../async-handler.js"
 import { randomUUID } from "node:crypto"
 
 export const advertiserRouter = Router()
@@ -21,87 +22,93 @@ const campaignSchema = z.object({
   leaderboard: z.boolean().default(true),
 })
 
-advertiserRouter.post("/campaigns", async (req, res) => {
-  const parsed = campaignSchema.safeParse(req.body)
-  if (!parsed.success) {
-    res.status(400).json({ error: "invalid campaign", issues: parsed.error.issues })
-    return
-  }
-  const c = parsed.data
+advertiserRouter.post(
+  "/campaigns",
+  asyncHandler(async (req, res) => {
+    const parsed = campaignSchema.safeParse(req.body)
+    if (!parsed.success) {
+      res.status(400).json({ error: "invalid campaign", issues: parsed.error.issues })
+      return
+    }
+    const c = parsed.data
 
-  let advertiser = db.prepare("SELECT id FROM advertisers WHERE email = ?").get(c.email) as { id: string } | undefined
-  if (!advertiser) {
-    const id = randomUUID()
-    db.prepare("INSERT INTO advertisers (id, email, company, created_at) VALUES (?, ?, ?, ?)").run(
-      id,
-      c.email,
-      c.company ?? null,
-      Date.now()
+    let advertiser = await db.get<{ id: string }>("SELECT id FROM advertisers WHERE email = ?", [c.email])
+    if (!advertiser) {
+      const id = randomUUID()
+      await db.run("INSERT INTO advertisers (id, email, company, created_at) VALUES (?, ?, ?, ?)", [
+        id,
+        c.email,
+        c.company ?? null,
+        Date.now(),
+      ])
+      advertiser = { id }
+    }
+
+    const campaignId = randomUUID()
+    const impressionsBought = c.blocks * 1000
+    const now = Date.now()
+    await db.run(
+      "INSERT INTO campaigns (id, advertiser_id, ad_line, url, brand_icon, surface, cpm_cents, blocks, impressions_bought, country_filter, delivery_speed, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_payment', ?, ?)",
+      [
+        campaignId,
+        advertiser.id,
+        c.adLine,
+        c.url,
+        c.brandIcon ?? null,
+        c.surface,
+        c.cpmCents,
+        c.blocks,
+        impressionsBought,
+        c.countryFilter ? JSON.stringify(c.countryFilter) : null,
+        c.deliverySpeed,
+        now,
+        now,
+      ]
     )
-    advertiser = { id }
-  }
 
-  const campaignId = randomUUID()
-  const impressionsBought = c.blocks * 1000
-  const now = Date.now()
-  db.prepare(
-    "INSERT INTO campaigns (id, advertiser_id, ad_line, url, brand_icon, surface, cpm_cents, blocks, impressions_bought, country_filter, delivery_speed, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_payment', ?, ?)"
-  ).run(
-    campaignId,
-    advertiser.id,
-    c.adLine,
-    c.url,
-    c.brandIcon ?? null,
-    c.surface,
-    c.cpmCents,
-    c.blocks,
-    impressionsBought,
-    c.countryFilter ? JSON.stringify(c.countryFilter) : null,
-    c.deliverySpeed,
-    now,
-    now
-  )
+    const amountCents = c.cpmCents * c.blocks
+    const checkout = await payments.createCheckoutSession({
+      amountCents,
+      description: `${c.blocks} block(s) of ${c.surface} impressions (${c.adLine})`,
+      metadata: { campaignId, advertiserId: advertiser.id, surface: c.surface },
+      successUrl: `${config.webBaseUrl}/advertise?paid=1&campaign=${campaignId}`,
+      cancelUrl: `${config.webBaseUrl}/advertise?paid=0`,
+    })
 
-  const amountCents = c.cpmCents * c.blocks
-  const checkout = await payments.createCheckoutSession({
-    amountCents,
-    description: `${c.blocks} block(s) of ${c.surface} impressions (${c.adLine})`,
-    metadata: { campaignId, advertiserId: advertiser.id, surface: c.surface },
-    successUrl: `${config.webBaseUrl}/advertise?paid=1&campaign=${campaignId}`,
-    cancelUrl: `${config.webBaseUrl}/advertise?paid=0`,
+    res.json({ campaignId, checkoutUrl: checkout.url, amountCents, mode: payments.mode })
   })
+)
 
-  res.json({ campaignId, checkoutUrl: checkout.url, amountCents, mode: payments.mode })
-})
+advertiserRouter.post(
+  "/campaigns/:id/confirm",
+  asyncHandler(async (req, res) => {
+    const id = String(req.params.id)
+    const campaign = await db.get<{ status: string; advertiser_id: string }>("SELECT * FROM campaigns WHERE id = ?", [id])
+    if (!campaign) {
+      res.status(404).json({ error: "campaign not found" })
+      return
+    }
+    if (campaign.status === "pending_payment") {
+      await db.run("UPDATE campaigns SET status = 'active', updated_at = ? WHERE id = ?", [Date.now(), id])
+    }
+    res.json({ ok: true, status: "active" })
+  })
+)
 
-advertiserRouter.post("/campaigns/:id/confirm", (req, res) => {
-  const id = String(req.params.id)
-  const campaign = db.prepare("SELECT * FROM campaigns WHERE id = ?").get(id) as
-    | { status: string; advertiser_id: string }
-    | undefined
-  if (!campaign) {
-    res.status(404).json({ error: "campaign not found" })
-    return
-  }
-  if (campaign.status === "pending_payment") {
-    db.prepare("UPDATE campaigns SET status = 'active', updated_at = ? WHERE id = ?").run(Date.now(), id)
-  }
-  res.json({ ok: true, status: "active" })
-})
-
-advertiserRouter.get("/campaigns", (req, res) => {
-  const email = String(req.query.email ?? "")
-  if (!email) {
-    res.status(400).json({ error: "email required" })
-    return
-  }
-  const advertiser = db.prepare("SELECT id FROM advertisers WHERE email = ?").get(email) as { id: string } | undefined
-  if (!advertiser) {
-    res.json({ campaigns: [] })
-    return
-  }
-  const rows = db
-    .prepare("SELECT * FROM campaigns WHERE advertiser_id = ? ORDER BY created_at DESC")
-    .all(advertiser.id)
-  res.json({ campaigns: rows })
-})
+advertiserRouter.get(
+  "/campaigns",
+  asyncHandler(async (req, res) => {
+    const email = String(req.query.email ?? "")
+    if (!email) {
+      res.status(400).json({ error: "email required" })
+      return
+    }
+    const advertiser = await db.get<{ id: string }>("SELECT id FROM advertisers WHERE email = ?", [email])
+    if (!advertiser) {
+      res.json({ campaigns: [] })
+      return
+    }
+    const rows = await db.all("SELECT * FROM campaigns WHERE advertiser_id = ? ORDER BY created_at DESC", [advertiser.id])
+    res.json({ campaigns: rows })
+  })
+)

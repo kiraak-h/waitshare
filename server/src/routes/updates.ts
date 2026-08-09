@@ -4,6 +4,7 @@ import path from "node:path"
 import { db } from "../db.js"
 import { signJson, getServerPublicKeyB64 } from "../services/signing.js"
 import { config, ensureDataDir } from "../config.js"
+import { asyncHandler } from "../async-handler.js"
 
 export const updatesRouter = Router()
 
@@ -20,63 +21,75 @@ updatesRouter.get("/key", (_req, res) => {
   res.json({ algorithm: "Ed25519", publicKey: getServerPublicKeyB64() })
 })
 
-updatesRouter.get("/latest", (req, res) => {
-  const platform = String(req.query.platform ?? "")
-  const version = String(req.query.version ?? "0")
-  if (!platform) {
-    res.status(400).json({ error: "platform required" })
-    return
-  }
-  const manifest = db.prepare("SELECT * FROM update_manifests WHERE platform = ?").get(platform) as
-    | { platform: string; version: string; url: string; sha256: string; signature: string; created_at: number }
-    | undefined
+updatesRouter.get(
+  "/latest",
+  asyncHandler(async (req, res) => {
+    const platform = String(req.query.platform ?? "")
+    const version = String(req.query.version ?? "0")
+    if (!platform) {
+      res.status(400).json({ error: "platform required" })
+      return
+    }
+    const manifest = await db.get<{
+      platform: string
+      version: string
+      url: string
+      sha256: string
+      signature: string
+      created_at: number
+    }>("SELECT * FROM update_manifests WHERE platform = ?", [platform])
 
-  if (!manifest) {
-    res.json({ latest: null })
-    return
-  }
+    if (!manifest) {
+      res.json({ latest: null })
+      return
+    }
 
-  const body = { ...signedPayload(manifest), createdAt: manifest.created_at }
-  if (version === manifest.version) {
-    res.json({ latest: body, upToDate: true })
-    return
-  }
+    const body = { ...signedPayload(manifest), createdAt: manifest.created_at }
+    if (version === manifest.version) {
+      res.json({ latest: body, upToDate: true })
+      return
+    }
 
-  res.json({
-    latest: { ...body, signature: manifest.signature },
-    upToDate: false,
-    verification: {
-      algorithm: "Ed25519",
-      signedFields: SIGNED_FIELDS,
-      publicKey: null,
-      note: "Clients verify the manifest signature over exactly {platform, version, url, sha256} against the WaitShare public key.",
-    },
+    res.json({
+      latest: { ...body, signature: manifest.signature },
+      upToDate: false,
+      verification: {
+        algorithm: "Ed25519",
+        signedFields: SIGNED_FIELDS,
+        publicKey: null,
+        note: "Clients verify the manifest signature over exactly {platform, version, url, sha256} against the WaitShare public key.",
+      },
+    })
   })
-})
+)
 
 function requireAdmin(req: { headers: { authorization?: string } }): boolean {
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, "")
   return Boolean(config.adminToken && token === config.adminToken)
 }
 
-updatesRouter.post("/", (req, res) => {
-  if (!requireAdmin(req)) {
-    res.status(401).json({ error: "admin token required" })
-    return
-  }
-  const body = req.body as { platform?: string; version?: string; url?: string; sha256?: string }
-  if (!body.platform || !body.version || !body.url || !body.sha256) {
-    res.status(400).json({ error: "platform, version, url, sha256 required" })
-    return
-  }
-  const payload = signedPayload(body as { platform: string; version: string; url: string; sha256: string })
-  const signature = signJson(payload)
-  db.prepare(
-    "INSERT INTO update_manifests (platform, version, url, sha256, signature, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(platform) DO UPDATE SET version = excluded.version, url = excluded.url, sha256 = excluded.sha256, signature = excluded.signature, created_at = excluded.created_at"
-  ).run(body.platform, body.version, body.url, body.sha256, signature, Date.now())
+updatesRouter.post(
+  "/",
+  asyncHandler(async (req, res) => {
+    if (!requireAdmin(req)) {
+      res.status(401).json({ error: "admin token required" })
+      return
+    }
+    const body = req.body as { platform?: string; version?: string; url?: string; sha256?: string }
+    if (!body.platform || !body.version || !body.url || !body.sha256) {
+      res.status(400).json({ error: "platform, version, url, sha256 required" })
+      return
+    }
+    const payload = signedPayload(body as { platform: string; version: string; url: string; sha256: string })
+    const signature = signJson(payload)
+    await db.run(
+      "INSERT INTO update_manifests (platform, version, url, sha256, signature, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(platform) DO UPDATE SET version = excluded.version, url = excluded.url, sha256 = excluded.sha256, signature = excluded.signature, created_at = excluded.created_at",
+      [body.platform, body.version, body.url, body.sha256, signature, Date.now()]
+    )
 
-  res.json({ ok: true, signature })
-})
+    res.json({ ok: true, signature })
+  })
+)
 
 updatesRouter.get("/artifacts/:name", (req, res) => {
   const name = path.basename(String(req.params.name ?? ""))

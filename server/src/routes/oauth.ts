@@ -2,6 +2,7 @@ import { Router } from "express"
 import { randomUUID } from "node:crypto"
 import { db } from "../db.js"
 import { config } from "../config.js"
+import { asyncHandler } from "../async-handler.js"
 
 export const oauthRouter = Router()
 
@@ -92,29 +93,33 @@ oauthRouter.get("/google/callback", async (req, res) => {
       return
     }
 
-    const existing = db
-      .prepare("SELECT id FROM devs WHERE google_sub = ? OR email = ?")
-      .get(info.sub, info.email) as { id: string } | undefined
+    const existing = await db.get<{ id: string }>("SELECT id FROM devs WHERE google_sub = ? OR email = ?", [
+      info.sub,
+      info.email,
+    ])
 
     const now = Date.now()
     let devId: string
     if (existing) {
       devId = existing.id
-      db.prepare("UPDATE devs SET google_sub = ?, email = ? WHERE id = ?").run(info.sub, info.email, devId)
+      await db.run("UPDATE devs SET google_sub = ?, email = ? WHERE id = ?", [info.sub, info.email, devId])
     } else {
       devId = randomUUID()
-      db.prepare(
-        "INSERT INTO devs (id, email, country, status, google_sub, created_at) VALUES (?, ?, NULL, 'active', ?, ?)"
-      ).run(devId, info.email, info.sub, now)
+      await db.run("INSERT INTO devs (id, email, country, status, google_sub, created_at) VALUES (?, ?, NULL, 'active', ?, ?)", [
+        devId,
+        info.email,
+        info.sub,
+        now,
+      ])
     }
 
     const token = randomUUID().replace(/-/g, "")
-    db.prepare("INSERT INTO sessions (token, dev_id, created_at, expires_at) VALUES (?, ?, ?, ?)").run(
+    await db.run("INSERT INTO sessions (token, dev_id, created_at, expires_at) VALUES (?, ?, ?, ?)", [
       token,
       devId,
       now,
-      now + 30 * 24 * 60 * 60 * 1000
-    )
+      now + 30 * 24 * 60 * 60 * 1000,
+    ])
 
     res.redirect(`${config.webBaseUrl}/dashboard#ws_token=${token}`)
   } catch {

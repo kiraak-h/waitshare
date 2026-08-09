@@ -27,6 +27,7 @@ export interface DevDto {
   email: string
   country: string | null
   status: string
+  trustTier: number
   balanceCents: number
   reserveCents: number
   totalEarnedCents: number

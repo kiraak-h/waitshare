@@ -19,23 +19,22 @@ export interface CampaignRow {
   created_at: number
 }
 
-export function listActiveCampaigns(surface?: string): CampaignRow[] {
+export async function listActiveCampaigns(surface?: string): Promise<CampaignRow[]> {
   if (surface) {
-    return db
-      .prepare("SELECT * FROM campaigns WHERE status = 'active' AND surface = ? ORDER BY cpm_cents DESC, created_at ASC")
-      .all(surface) as CampaignRow[]
+    return db.all<CampaignRow>("SELECT * FROM campaigns WHERE status = 'active' AND surface = ? ORDER BY cpm_cents DESC, created_at ASC", [surface])
   }
-  return db.prepare("SELECT * FROM campaigns WHERE status = 'active' ORDER BY cpm_cents DESC, created_at ASC").all() as CampaignRow[]
+  return db.all<CampaignRow>("SELECT * FROM campaigns WHERE status = 'active' ORDER BY cpm_cents DESC, created_at ASC")
 }
 
-export function getCampaign(id: string): CampaignRow | undefined {
-  return db.prepare("SELECT * FROM campaigns WHERE id = ?").get(id) as CampaignRow | undefined
+export async function getCampaign(id: string): Promise<CampaignRow | undefined> {
+  return db.get<CampaignRow>("SELECT * FROM campaigns WHERE id = ?", [id])
 }
 
-export function lastServeForDevice(deviceId: string, surface: string): { campaign_id: string } | undefined {
-  return db
-    .prepare("SELECT campaign_id FROM serves WHERE device_id = ? AND surface = ? ORDER BY issued_at DESC LIMIT 1")
-    .get(deviceId, surface) as { campaign_id: string } | undefined
+export async function lastServeForDevice(deviceId: string, surface: string): Promise<{ campaign_id: string } | undefined> {
+  return db.get<{ campaign_id: string }>(
+    "SELECT campaign_id FROM serves WHERE device_id = ? AND surface = ? ORDER BY issued_at DESC LIMIT 1",
+    [deviceId, surface]
+  )
 }
 
 export interface NextAd {
@@ -47,19 +46,24 @@ export interface NextAd {
   expiresAt: number
 }
 
-export function pendingServeCount(deviceId: string): number {
-  const row = db
-    .prepare("SELECT COUNT(*) AS n FROM serves WHERE device_id = ? AND status = 'pending'")
-    .get(deviceId) as { n: number }
+export async function pendingServeCount(deviceId: string): Promise<number> {
+  const row = (await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM serves WHERE device_id = ? AND status = 'pending'", [deviceId])) as {
+    n: number
+  }
   return row.n
 }
 
-export function pickNextAd(surface: string, deviceId: string, devId: string | null, networkHash?: string): NextAd | null {
-  const candidates = listActiveCampaigns(surface).filter((c) => c.impressions_served < c.impressions_bought)
+export async function pickNextAd(
+  surface: string,
+  deviceId: string,
+  devId: string | null,
+  networkHash?: string
+): Promise<NextAd | null> {
+  const candidates = (await listActiveCampaigns(surface)).filter((c) => c.impressions_served < c.impressions_bought)
   if (candidates.length === 0) return null
-  if (pendingServeCount(deviceId) >= config.maxPendingServes) return null
+  if ((await pendingServeCount(deviceId)) >= config.maxPendingServes) return null
 
-  const last = lastServeForDevice(deviceId, surface)
+  const last = await lastServeForDevice(deviceId, surface)
   const lastId = last?.campaign_id
 
   let pick = candidates[0]
@@ -72,9 +76,10 @@ export function pickNextAd(surface: string, deviceId: string, devId: string | nu
   const now = Date.now()
   const ttl = config.serveTtlMs
 
-  db.prepare(
-    "INSERT INTO serves (id, campaign_id, dev_id, device_id, surface, ad_line, url, nonce, network_hash, issued_at, expires_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')"
-  ).run(serveId, pick.id, devId, deviceId, surface, pick.ad_line, pick.url, nonce, networkHash ?? null, now, now + ttl)
+  await db.run(
+    "INSERT INTO serves (id, campaign_id, dev_id, device_id, surface, ad_line, url, nonce, network_hash, issued_at, expires_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')",
+    [serveId, pick.id, devId, deviceId, surface, pick.ad_line, pick.url, nonce, networkHash ?? null, now, now + ttl]
+  )
 
   return {
     campaign: pick,

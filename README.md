@@ -128,8 +128,16 @@ Impression integrity beyond signatures:
   - **IP binding** — each serve is bound to the network that issued it; an impression from a
     different masked network is rejected (403) and the serve voided.
   - Rejections land in the `fraud_events` audit table and increment `devs.fraud_flags`.
-  - `server/src/services/network.ts` exposes a `classifyNetwork()` hook for ASN/DC reputation; it
-    stays unenforced until a GeoLite2 dataset is supplied.
+  - **ASN/DC reputation** — `server/src/services/asn.ts` classifies IPs against a bundled AWS +
+    DigitalOcean range dataset (`server/assets/asn.json`); with `TIER2_DC_ENFORCE` on (default),
+    datacenter/cloud networks are withheld from serving (`tier2-dc` events logged).
+- **Risk scoring + trust tiers (Tier 3).** Every impression gets a 0–100 risk score
+  (`server/src/services/scoring.ts`) from activity-shape statistics (regularity, duration/
+  viewability uniformity, rate, network rotation, flags, account youth) — no content factors.
+  Score ≥ `TIER3_HIGH_RISK` (75) rejects, ≥ `TIER3_REVIEW` (55) flags for review. Trust tiers
+  (`0` new → `1` established → `2` trusted) gate serve caps, and tier-0 accounts get reduced
+  hourly/daily caps plus a `TIER0_PAYOUT_CAP_CENTS` payout gate. Admins clear/review/suspend via
+  `/api/v1/admin/review`.
 
 ## Signed updates
 
@@ -162,10 +170,12 @@ Client updates are integrity-protected end-to-end:
   `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` to go live.
 - **CI** — `.github/workflows/ci.yml` typechecks, builds, and runs a self-contained smoke test
   (`npm test -w server`) that spawns the server on a temp data dir and drives
-  auth → device key → campaign → serve → signed impression → payout → updates end to end.
-- **Relational DB** — `server/migrations/001_init.sql` is the authoritative Postgres DDL, and
-  `server/scripts/export-postgres.mjs` dumps SQLite data to portable SQL. An async data-access
-  layer is the remaining step for running natively on Postgres.
+  auth → device key → campaign → serve → signed impression → payout → updates → tier-2/3 fraud
+  signals → admin review end to end; a second job runs the same suite against a Postgres 15
+  service container.
+- **Relational DB** — the server runs natively on SQLite (default, dev) or Postgres: set
+  `DATABASE_URL` and the driver loads `server/migrations/001_init.sql` (idempotent DDL + indexes)
+  at startup. `server/scripts/export-postgres.mjs` migrates an existing SQLite DB to portable SQL.
 - See `docs/PRODUCTION.md` for the full deployment guide.
 
 ## Security notes
@@ -179,6 +189,12 @@ Client updates are integrity-protected end-to-end:
 
 ## Production roadmap
 
-- ASN/DC reputation: supply a GeoLite2 dataset behind the `classifyNetwork()` hook and enforce it.
-- ML scoring ensemble (Tier 3) + graduated trust with a human review queue.
-- Async data-access layer to run natively on Postgres (schema + export tooling already ship).
+Shipped: ASN/DC reputation (bundled dataset + enforcement), deterministic risk scoring (Tier 3)
+with graduated trust tiers and a human review queue, and a native Postgres runtime (async
+data-access layer + idempotent schema).
+
+Remaining (all behind existing interfaces, no contract changes):
+- Swap the deterministic `scoreImpression()` weights for a supervised ML ensemble trained on
+  labeled review-queue data.
+- Broaden the ASN dataset beyond AWS/DigitalOcean (drop in a GeoLite2-style dataset via
+  `ASN_DB_PATH`) and add advertiser-side chargeback/Radar defense.

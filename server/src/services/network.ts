@@ -2,6 +2,7 @@ import crypto from "node:crypto"
 import fs from "node:fs"
 import path from "node:path"
 import { config, ensureDataDir } from "../config.js"
+import { classifyIp } from "./asn.js"
 import type { Request } from "express"
 
 const saltPath = path.join(ensureDataDir(), "fraud-salt")
@@ -20,6 +21,7 @@ export interface NetworkSignals {
   networkHash: string
   ipHash: string
   kind: string
+  asnName?: string
 }
 
 export function getClientIp(req: Request): string {
@@ -51,19 +53,21 @@ function hashWithSalt(input: string): string {
 
 /**
  * Pluggable network classification. Returns "datacenter" | "residential" | "unknown".
- * Ship a GeoLite2-ASN dataset (or similar) behind this hook to flag DC/VPS ranges;
- * without one it stays "unknown" and is not enforced.
+ * Backed by a bundled ASN/cloud-range dataset (server/assets/asn.json, AWS + DigitalOcean);
+ * supply your own dataset via ASN_DB_PATH (e.g. a GeoLite2-derived list) to extend coverage.
  */
-export function classifyNetwork(_ip: string): string {
-  return "unknown"
+export function classifyNetwork(ip: string): { kind: string; name?: string } {
+  return classifyIp(ip)
 }
 
 export function deriveNetworkSignals(req: Request): NetworkSignals {
   const ip = getClientIp(req)
+  const cls = classifyIp(ip)
   return {
     networkHash: hashWithSalt(maskIp(ip)),
     ipHash: hashWithSalt(ip),
-    kind: classifyNetwork(ip),
+    kind: cls.kind,
+    asnName: cls.name,
   }
 }
 

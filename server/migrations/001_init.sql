@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS devs (
   stripe_account_id TEXT,
   stripe_onboarded  BOOLEAN NOT NULL DEFAULT FALSE,
   fraud_flags       INTEGER NOT NULL DEFAULT 0,
+  trust_tier        INTEGER NOT NULL DEFAULT 0,
   created_at        BIGINT NOT NULL
 );
 
@@ -144,6 +145,20 @@ CREATE TABLE IF NOT EXISTS split_contract (
 INSERT INTO split_contract (id, dev_share, platform_share, version, locked_at)
 VALUES (1, 60, 40, 1, (SELECT (EXTRACT(EPOCH FROM now()) * 1000)::BIGINT))
 ON CONFLICT (id) DO NOTHING;
+
+-- Idempotent column add for clusters created from an earlier revision of this schema.
+ALTER TABLE devs ADD COLUMN IF NOT EXISTS trust_tier INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE impressions ADD COLUMN IF NOT EXISTS reserved_mills BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE impressions ADD COLUMN IF NOT EXISTS reserve_released_at BIGINT;
+ALTER TABLE impressions ADD COLUMN IF NOT EXISTS nonce TEXT;
+ALTER TABLE impressions ADD COLUMN IF NOT EXISTS focus_pct INTEGER NOT NULL DEFAULT 100;
+ALTER TABLE impressions ADD COLUMN IF NOT EXISTS network_hash TEXT;
+ALTER TABLE impressions ADD COLUMN IF NOT EXISTS ip_hash TEXT;
+ALTER TABLE serves ADD COLUMN IF NOT EXISTS nonce TEXT;
+ALTER TABLE serves ADD COLUMN IF NOT EXISTS network_hash TEXT;
+ALTER TABLE devs ADD COLUMN IF NOT EXISTS reserve_mills BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE devs ADD COLUMN IF NOT EXISTS fraud_flags INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE payouts ADD COLUMN IF NOT EXISTS available_at BIGINT;
 
 -- Indexes for the hot query paths (see server/src/services/*)
 CREATE INDEX IF NOT EXISTS idx_serves_device_status   ON serves (device_id, status);
