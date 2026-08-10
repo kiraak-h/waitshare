@@ -12,6 +12,7 @@ const require = createRequire(path.join(serverDir, "package.json"))
 async function api(base, p, opts = {}) {
   const res = await fetch(base + p, {
     ...opts,
+    signal: opts.signal ?? AbortSignal.timeout(20000),
     headers: { "content-type": "application/json", ...(opts.headers || {}) },
   })
   let body = null
@@ -37,6 +38,8 @@ function record(name, pass, detail = "") {
 }
 
 let child = null
+let pgClient = null
+let tdb = null
 let base = process.env.SMOKE_BASE_URL
 let dataDir = null
 const local = !base
@@ -155,8 +158,6 @@ try {
 
   if (local) {
     const pgUrl = process.env.DATABASE_URL
-    let tdb = null
-    let pgClient = null
     const seedImp = async (row) => {
       const sql = `INSERT INTO impressions (id, serve_id, campaign_id, dev_id, device_id, surface, duration_ms, viewable_pct, focus_pct, nonce, network_hash, ip_hash, served_at, gross_mills, dev_share_mills, reserved_mills, signature, status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'credited')`
@@ -244,6 +245,16 @@ try {
   console.error("smoke error:", err)
   process.exitCode = 1
 } finally {
+  if (pgClient) {
+    try {
+      await pgClient.end()
+    } catch {}
+  }
+  if (tdb) {
+    try {
+      tdb.close()
+    } catch {}
+  }
   if (child) {
     child.kill()
   }
