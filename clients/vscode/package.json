@@ -1,0 +1,51 @@
+{
+  "name": "waitshare",
+  "displayName": "WaitShare",
+  "description": "Get paid for waiting. Privacy-first sponsored lines in your AI coding tools. 60% to developers, locked.",
+  "version": "0.1.0",
+  "publisher": "waitshare",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "waitshare.status",
+        "title": "WaitShare: Show status"
+      },
+      {
+        "command": "waitshare.start",
+        "title": "WaitShare: Start sponsored line"
+      },
+      {
+        "command": "waitshare.report",
+        "title": "WaitShare: Report impression"
+      },
+      {
+        "command": "waitshare.verifyUpdate",
+        "title": "WaitShare: Verify update signature"
+      },
+      {
+        "command": "waitshare.update",
+        "title": "WaitShare: Update extension (verified)"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "package": "npm run build && vsce package --allow-missing-repository",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.7.3"
+  }
+}

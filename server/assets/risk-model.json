@@ -1,0 +1,22 @@
+{
+  "name": "logistic-2026-08-09",
+  "features": [
+    "regularity",
+    "durationUniformity",
+    "viewabilityUniformity",
+    "rate",
+    "networkScore",
+    "flagScore",
+    "youth"
+  ],
+  "weights": [
+    1.5715512864590153,
+    1.1438843203893068,
+    1.1471561891128472,
+    1.22553302846825,
+    1.0218539000268634,
+    1.6727994751268631,
+    1.5319034583677076
+  ],
+  "intercept": -4.598116507059001
+}
