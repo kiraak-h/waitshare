@@ -581,8 +581,13 @@ body {
   background: rgba(255, 212, 0, 0.15);
   color: var(--accent-2);
 }
+.badge-disputed {
+  background: rgba(255, 140, 0, 0.15);
+  color: #ff8c00;
+}
 .badge-voided,
-.badge-blocked {
+.badge-blocked,
+.badge-refunded {
   background: rgba(255, 92, 92, 0.15);
   color: var(--red);
 }

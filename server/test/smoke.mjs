@@ -156,6 +156,47 @@ try {
   const split = await api(base, "/split/")
   record("smoke: split contract locked 60/40", split.status === 200 && split.body.split.devShare === 60 && split.body.split.platformShare === 40, `${split.status} ${JSON.stringify(split.body)}`)
 
+  // tier4: advertiser chargeback lifecycle (stub payment-event simulation)
+  const adv2Email = `smoke-adv2-${Date.now()}@test.dev`
+  const dc = await api(base, "/advertiser/campaigns", {
+    method: "POST",
+    body: JSON.stringify({
+      email: adv2Email,
+      adLine: "Dispute sim campaign",
+      url: "https://example.com",
+      surface: "opencode",
+      cpmCents: 99999,
+      blocks: 5,
+      deliverySpeed: "fast",
+    }),
+  })
+  const disputeCampaignId = dc.body.campaignId
+  await api(base, `/advertiser/campaigns/${disputeCampaignId}/confirm`, { method: "POST" })
+  const beforeDispute = await api(base, "/ads/next?surface=opencode&deviceId=dispute-device-a")
+  record(
+    "tier4: highest-CPM active campaign serves before dispute",
+    beforeDispute.status === 200 && beforeDispute.body.ad?.adLine === "Dispute sim campaign",
+    `${beforeDispute.status} ${beforeDispute.body.ad?.adLine}`
+  )
+  const disputeEv = await api(base, `/advertiser/campaigns/${disputeCampaignId}/payment-event`, {
+    method: "POST",
+    body: JSON.stringify({ event: "dispute" }),
+  })
+  record("tier4: dispute flips campaign to disputed", disputeEv.status === 200 && disputeEv.body.status === "disputed", `${disputeEv.status} ${JSON.stringify(disputeEv.body)}`)
+  const afterDispute = await api(base, "/ads/next?surface=opencode&deviceId=dispute-device-b")
+  record(
+    "tier4: disputed campaign stops serving (auction skips it)",
+    afterDispute.status === 200 && Boolean(afterDispute.body.ad?.serveId) && afterDispute.body.ad?.adLine !== "Dispute sim campaign",
+    `${afterDispute.status} ${afterDispute.body.ad?.adLine}`
+  )
+  const listD = await api(base, `/advertiser/campaigns?email=${encodeURIComponent(adv2Email)}`)
+  record("tier4: advertiser list reflects disputed status", listD.body.campaigns?.[0]?.status === "disputed", `${listD.body.campaigns?.[0]?.status}`)
+  const refundEv = await api(base, `/advertiser/campaigns/${disputeCampaignId}/payment-event`, {
+    method: "POST",
+    body: JSON.stringify({ event: "refund" }),
+  })
+  record("tier4: refund flips campaign to refunded", refundEv.status === 200 && refundEv.body.status === "refunded", `${refundEv.status} ${JSON.stringify(refundEv.body)}`)
+
   if (local) {
     const pgUrl = process.env.DATABASE_URL
     const seedImp = async (row) => {

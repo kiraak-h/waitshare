@@ -47,6 +47,19 @@ jobs:
       - run: npm run build -w server
       - run: DATABASE_URL=postgres://waitshare:waitshare_dev@localhost:5432/waitshare npm test -w server
 
+  asn:
+    name: asn dataset (regenerate check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:asn -w server
+      - run: git diff --exit-code server/assets/asn.json
+
   web:
     name: web (typecheck, build)
     runs-on: ubuntu-latest
