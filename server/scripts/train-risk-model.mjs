@@ -2,19 +2,26 @@ import fs from "node:fs"
 import path from "node:path"
 
 /**
- * Trains a logistic-regression risk model on synthetic labeled data and writes
- * the weights to server/assets/risk-model.json.
+ * Trains a logistic-regression risk model and writes the weights to
+ * server/assets/risk-model.json.
  *
- * There is no real labeled review-queue data yet, so this trains on synthetic
- * samples drawn from the honest and bot distributions described in
- * docs/FRAUD.md. When real labeled data exists, run a classifier on the same
- * 7 normalized features and export the same JSON shape:
- *   { name, features, weights, intercept }
+ * Data source:
+ * - `--data <csv>` — real labeled rows exported from the review queue. CSV must
+ *   have a header row containing the 7 feature columns (regularity,
+ *   durationUniformity, viewabilityUniformity, rate, networkScore, flagScore,
+ *   youth) plus a `label` column (0 = honest, 1 = bot).
+ * - otherwise — synthetic samples drawn from the honest and bot distributions
+ *   described in docs/FRAUD.md (placeholder until real labels exist).
+ *
+ * Output JSON shape: { name, features, weights, intercept }
  */
 
 const FEATURES = ["regularity", "durationUniformity", "viewabilityUniformity", "rate", "networkScore", "flagScore", "youth"]
 
-const outPath = process.argv[2] ?? path.resolve(import.meta.dirname, "../assets/risk-model.json")
+const args = process.argv.slice(2)
+const dataIdx = args.indexOf("--data")
+const dataPath = dataIdx >= 0 ? args[dataIdx + 1] : null
+const outPath = args.find((a) => !a.startsWith("--")) ?? path.resolve(import.meta.dirname, "../assets/risk-model.json")
 
 function gaussian(mean, std) {
   let u = 0
@@ -26,6 +33,25 @@ function gaussian(mean, std) {
 
 function clamp01(x) {
   return Math.max(0, Math.min(1, x))
+}
+
+function loadCsv(file) {
+  const text = fs.readFileSync(file, "utf8")
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean)
+  const header = lines[0].split(",").map((s) => s.trim())
+  const featIdx = FEATURES.map((f) => header.indexOf(f))
+  if (featIdx.some((i) => i < 0)) throw new Error(`CSV must contain columns: ${FEATURES.join(", ")}`)
+  const labelIdx = header.indexOf("label")
+  if (labelIdx < 0) throw new Error('CSV must contain a "label" column (0 = honest, 1 = bot)')
+  const rows = lines.slice(1)
+  if (rows.length < 20) throw new Error(`need at least 20 labeled rows, got ${rows.length}`)
+  return rows.map((line) => {
+    const parts = line.split(",").map((s) => s.trim())
+    return {
+      x: featIdx.map((i) => clamp01(Number(parts[i]))),
+      y: Number(parts[labelIdx]) === 1 ? 1 : 0,
+    }
+  })
 }
 
 function honestSample() {
@@ -66,11 +92,18 @@ function botSample() {
   ]
 }
 
-const N = 3000
-const samples = []
-for (let i = 0; i < N; i++) {
-  samples.push({ x: honestSample(), y: 0 })
-  samples.push({ x: botSample(), y: 1 })
+let samples
+if (dataPath) {
+  samples = loadCsv(dataPath)
+  console.error(`loaded ${samples.length} labeled rows from ${dataPath}`)
+} else {
+  const N = 3000
+  samples = []
+  for (let i = 0; i < N; i++) {
+    samples.push({ x: honestSample(), y: 0 })
+    samples.push({ x: botSample(), y: 1 })
+  }
+  console.error(`no --data given; training on ${samples.length} synthetic samples`)
 }
 
 for (let i = samples.length - 1; i > 0; i--) {

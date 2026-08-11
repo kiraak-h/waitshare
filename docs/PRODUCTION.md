@@ -103,6 +103,10 @@ Supporting artifacts:
   tier-2/3 fraud signals → admin review).
 - `server-postgres` job: same smoke test against a `postgres:15` service
   container via `DATABASE_URL`.
+- `asn` job: regenerates the cloud-IP dataset with `npm run build:asn -w server`
+  and fails if the committed `server/assets/asn.json` is stale (keeps the
+  dataset tracking provider range changes; run locally where RIPE Stat is
+  unreachable and commit the result).
 - `web` job: `npm ci`, typecheck, build.
 
 The smoke test also runs locally: `npm test -w server`, or against a running

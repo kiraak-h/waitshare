@@ -203,8 +203,9 @@ Radar defense (dispute/refund webhooks), and a native Postgres runtime (async da
 idempotent schema).
 
 Remaining (all behind existing interfaces, no contract changes):
-- Replace the synthetic logistic weights in `server/assets/risk-model.json` with a supervised
-  model trained on labeled review-queue data (`npm run train:risk -w server` retrains).
+- Replace the synthetic logistic weights in `server/assets/risk-model.json` with a model trained
+  on labeled review-queue data. The trainer (`npm run train:risk -w server`) accepts real labels
+  via `--data labeled.csv` (7 feature columns + `label`) and falls back to synthetic samples.
 - Fold RIPE-announced prefixes for additional cloud ASNs into `server/assets/asn.json` where the
-  RIPE Stat API is reachable (the builder already supports it; CI can regenerate via
-  `npm run build:asn -w server`).
+  RIPE Stat API is reachable (the builder already supports it). CI runs a freshness job
+  (`npm run build:asn -w server`) that fails if the committed dataset is stale.

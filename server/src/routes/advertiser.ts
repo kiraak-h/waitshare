@@ -112,3 +112,34 @@ advertiserRouter.get(
     res.json({ campaigns: rows })
   })
 )
+
+// Stub-mode payment event simulation. Mirrors the live webhook handlers
+// (charge.dispute.created / charge.refunded) so the chargeback lifecycle is
+// testable offline. Never registered in live mode.
+if (config.stripeMode === "stub") {
+  advertiserRouter.post(
+    "/campaigns/:id/payment-event",
+    asyncHandler(async (req, res) => {
+      const id = String(req.params.id)
+      const event = String(req.body?.event ?? "")
+      const campaign = await db.get<{ id: string }>("SELECT id FROM campaigns WHERE id = ?", [id])
+      if (!campaign) {
+        res.status(404).json({ error: "campaign not found" })
+        return
+      }
+      if (event === "dispute") {
+        await db.run("UPDATE campaigns SET status = 'disputed', updated_at = ? WHERE id = ?", [Date.now(), id])
+        await db.run(
+          "INSERT INTO fraud_events (type, dev_id, device_id, network_hash, reason, created_at) VALUES ('chargeback', NULL, NULL, NULL, ?, ?)",
+          [`stub dispute simulation on campaign ${id}`, Date.now()]
+        )
+      } else if (event === "refund") {
+        await db.run("UPDATE campaigns SET status = 'refunded', updated_at = ? WHERE id = ?", [Date.now(), id])
+      } else {
+        res.status(400).json({ error: "event must be 'dispute' or 'refund'" })
+        return
+      }
+      res.json({ ok: true, status: event === "dispute" ? "disputed" : "refunded" })
+    })
+  )
+}

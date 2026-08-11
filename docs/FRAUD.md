@@ -129,7 +129,10 @@ Where money is actually protected.
   (campaign → `status = 'disputed'` and a `chargeback` row in `fraud_events`), `charge.refunded`
   (fully refunded → `status = 'refunded'`), and `charge.dispute.closed`. Disputed/refunded
   campaigns stop serving immediately and can be re-reviewed by an operator before any further
-  delivery. Stub mode mirrors these statuses so the payment-risk lifecycle is testable offline.
+  delivery. Stub mode mirrors these transitions via
+  `POST /advertiser/campaigns/:id/payment-event` (`{ event: "dispute" | "refund" }`, registered
+  only when `STRIPE_MODE=stub`) so the payment-risk lifecycle is covered by the smoke suite
+  offline (see the `tier4:*` checks in `server/test/smoke.mjs`).
 
 ## Known hard problem: human vs. agent-initiated waits
 

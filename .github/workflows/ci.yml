@@ -47,6 +47,39 @@ jobs:
       - run: npm run build -w server
       - run: DATABASE_URL=postgres://waitshare:waitshare_dev@localhost:5432/waitshare npm test -w server
 
+  asn:
+    name: asn dataset (regenerate check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:asn -w server
+      - name: Check entries match HEAD (ignore generated_at)
+        run: |
+          node -e '
+            const fs = require("fs");
+            const cp = require("child_process");
+            cp.execSync("git show HEAD:server/assets/asn.json > /tmp/asn-head.json");
+            const cur = JSON.parse(fs.readFileSync("server/assets/asn.json", "utf8")).entries;
+            const head = JSON.parse(fs.readFileSync("/tmp/asn-head.json", "utf8")).entries;
+            if (JSON.stringify(cur) !== JSON.stringify(head)) {
+              console.error("asn.json is stale: fresh build differs from HEAD (" + cur.length + " vs " + head.length + " entries)");
+              console.error("fix: download the asn.json artifact and commit it, or run: npm run build:asn -w server && git add server/assets/asn.json && git commit");
+              process.exit(1);
+            }
+            console.log("asn.json entries up to date (" + cur.length + ")");
+          '
+      - name: Upload regenerated dataset if stale
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asn.json
+          path: server/assets/asn.json
+
   web:
     name: web (typecheck, build)
     runs-on: ubuntu-latest
