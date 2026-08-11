@@ -157,7 +157,10 @@ try {
   record("smoke: split contract locked 60/40", split.status === 200 && split.body.split.devShare === 60 && split.body.split.platformShare === 40, `${split.status} ${JSON.stringify(split.body)}`)
 
   // tier4: advertiser chargeback lifecycle (stub payment-event simulation)
-  const adv2Email = `smoke-adv2-${Date.now()}@test.dev`
+  const runId = Date.now()
+  const adv2Email = `smoke-adv2-${runId}@test.dev`
+  const disputeDeviceA = `dispute-device-a-${runId}`
+  const disputeDeviceB = `dispute-device-b-${runId}`
   const dc = await api(base, "/advertiser/campaigns", {
     method: "POST",
     body: JSON.stringify({
@@ -172,7 +175,7 @@ try {
   })
   const disputeCampaignId = dc.body.campaignId
   await api(base, `/advertiser/campaigns/${disputeCampaignId}/confirm`, { method: "POST" })
-  const beforeDispute = await api(base, "/ads/next?surface=opencode&deviceId=dispute-device-a")
+  const beforeDispute = await api(base, `/ads/next?surface=opencode&deviceId=${disputeDeviceA}`)
   record(
     "tier4: highest-CPM active campaign serves before dispute",
     beforeDispute.status === 200 && beforeDispute.body.ad?.adLine === "Dispute sim campaign",
@@ -183,7 +186,7 @@ try {
     body: JSON.stringify({ event: "dispute" }),
   })
   record("tier4: dispute flips campaign to disputed", disputeEv.status === 200 && disputeEv.body.status === "disputed", `${disputeEv.status} ${JSON.stringify(disputeEv.body)}`)
-  const afterDispute = await api(base, "/ads/next?surface=opencode&deviceId=dispute-device-b")
+  const afterDispute = await api(base, `/ads/next?surface=opencode&deviceId=${disputeDeviceB}`)
   record(
     "tier4: disputed campaign stops serving (auction skips it)",
     afterDispute.status === 200 && Boolean(afterDispute.body.ad?.serveId) && afterDispute.body.ad?.adLine !== "Dispute sim campaign",

@@ -47,9 +47,10 @@ export interface NextAd {
 }
 
 export async function pendingServeCount(deviceId: string): Promise<number> {
-  const row = (await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM serves WHERE device_id = ? AND status = 'pending'", [deviceId])) as {
-    n: number
-  }
+  const row = (await db.get<{ n: number }>(
+    "SELECT COUNT(*) AS n FROM serves WHERE device_id = ? AND status = 'pending' AND expires_at > ?",
+    [deviceId, Date.now()]
+  )) as { n: number }
   return row.n
 }
 

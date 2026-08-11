@@ -2,6 +2,7 @@ import assert from "node:assert"
 import { toPgSql } from "../src/db.js"
 import { meanStd, cv, clamp01, extractFeatures } from "../src/services/scoring.js"
 import { HeuristicModel, LogisticModel, getRiskModel } from "../src/services/risk-model.js"
+import { parseV4, parseV6, ipv6ToBigInt, findV6 } from "../src/services/asn.js"
 
 let passed = 0
 let failed = 0
@@ -99,6 +100,48 @@ t("logistic: monotone increasing in a positively-weighted feature", () => {
 })
 t("getRiskModel: returns a cached singleton", () => {
   assert.strictEqual(getRiskModel(), getRiskModel())
+})
+
+// --- ASN parsing ------------------------------------------------------------
+t("asn: parseV4 boundaries", () => {
+  const r = parseV4("1.2.3.0/24")!
+  assert.strictEqual(r.start, ((1 << 24) | (2 << 16) | (3 << 8) | 0) >>> 0)
+  assert.strictEqual(r.end, r.start + 255)
+})
+t("asn: parseV4 /32 and full range", () => {
+  assert.strictEqual(parseV4("10.0.0.1/32")!.start, parseV4("10.0.0.1/32")!.end)
+  assert.strictEqual(parseV4("0.0.0.0/0")!.start, 0)
+  assert.strictEqual(parseV4("0.0.0.0/0")!.end, 0xffffffff)
+})
+t("asn: parseV4 rejects malformed", () => {
+  assert.strictEqual(parseV4("999.1.1.1/8"), null)
+  assert.strictEqual(parseV4("1.2.3/8"), null)
+  assert.strictEqual(parseV4("1.2.3.4/33"), null)
+})
+t("asn: parseV6 with :: compression", () => {
+  const r = parseV6("2a00:1c68::/29")!
+  assert.ok(r.start < r.end)
+  assert.strictEqual(parseV6("::1/128")!.start, 1n)
+  assert.strictEqual(parseV6("2001:db8::/32")!.start, 0x20010db8000000000000000000000000n)
+})
+t("asn: ipv6ToBigInt handles compressed addresses", () => {
+  assert.strictEqual(ipv6ToBigInt("::1"), 1n)
+  assert.strictEqual(ipv6ToBigInt("2a00:1c68::"), parseV6("2a00:1c68::/29")!.start)
+  assert.strictEqual(ipv6ToBigInt("::ffff:7f00:1"), 0xffff7f000001n)
+  assert.strictEqual(ipv6ToBigInt("2a00:1c68:0:0:0:0:0:1"), 0x2a001c68000000000000000000000001n)
+})
+t("asn: findV6 binary search matches range", () => {
+  const ranges = [
+    { start: 10n, end: 20n, name: "a" },
+    { start: 50n, end: 60n, name: "b" },
+    { start: 100n, end: 200n, name: "c" },
+  ]
+  assert.strictEqual(findV6(ranges, 15n), "a")
+  assert.strictEqual(findV6(ranges, 55n), "b")
+  assert.strictEqual(findV6(ranges, 150n), "c")
+  assert.strictEqual(findV6(ranges, 1n), null)
+  assert.strictEqual(findV6(ranges, 21n), null)
+  assert.strictEqual(findV6(ranges, 500n), null)
 })
 
 console.log(`\n${passed}/${passed + failed} unit checks passed`)

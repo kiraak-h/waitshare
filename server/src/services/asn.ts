@@ -32,7 +32,7 @@ function defaultDbPath(): string {
   return path.resolve(import.meta.dirname, "../../assets/asn.json")
 }
 
-function parseV4(cidr: string): { start: number; end: number } | null {
+export function parseV4(cidr: string): { start: number; end: number } | null {
   const [ip, bitsRaw] = cidr.split("/")
   const octets = ip.split(".").map(Number)
   if (octets.length !== 4 || octets.some((o) => Number.isNaN(o) || o < 0 || o > 255)) return null
@@ -45,7 +45,7 @@ function parseV4(cidr: string): { start: number; end: number } | null {
   return { start, end }
 }
 
-function parseV6(cidr: string): { start: bigint; end: bigint } | null {
+export function parseV6(cidr: string): { start: bigint; end: bigint } | null {
   const [ipPart, bitsRaw] = cidr.split("/")
   const bits = bitsRaw ? Number(bitsRaw) : 128
   const halves = ipPart.split("::")
@@ -61,9 +61,11 @@ function parseV6(cidr: string): { start: bigint; end: bigint } | null {
   if (hextets.length !== 8 || hextets.some((h) => Number.isNaN(h))) return null
   let raw = 0n
   for (const h of hextets) raw = (raw << 16n) | BigInt(h)
-  const mask = bits >= 128 ? 0n : bits <= 0 ? 0n : ~((1n << BigInt(128 - bits)) - 1n)
-  const start = bits <= 0 ? 0n : raw & mask
-  const end = bits >= 128 ? (1n << 128n) - 1n : start + ((1n << BigInt(128 - bits)) - 1n)
+  if (bits >= 128) return { start: raw, end: raw }
+  if (bits <= 0) return { start: 0n, end: (1n << 128n) - 1n }
+  const mask = ~((1n << BigInt(128 - bits)) - 1n)
+  const start = raw & mask
+  const end = start + ((1n << BigInt(128 - bits)) - 1n)
   return { start, end }
 }
 
@@ -104,8 +106,7 @@ function ipv4ToInt(ip: string): number | null {
   return ((octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3]) >>> 0
 }
 
-function findV4(ranges: V4Range[], ip: number): string | null {
-  let lo = 0
+function findV4(ranges: V4Range[], ip: number): string | null {  let lo = 0
   let hi = ranges.length - 1
   while (lo <= hi) {
     const mid = (lo + hi) >> 1
@@ -117,22 +118,36 @@ function findV4(ranges: V4Range[], ip: number): string | null {
   return null
 }
 
-function ipv6ToBigInt(ip: string): bigint | null {
-  const parts = ip.split(":")
-  if (parts.length !== 8) return null
-  let v = 0n
-  for (const p of parts) {
-    const h = parseInt(p || "0", 16)
-    if (Number.isNaN(h)) return null
-    v = (v << 16n) | BigInt(h)
+export function ipv6ToBigInt(ip: string): bigint | null {
+  const halves = ip.split("::")
+  if (halves.length > 2) return null
+  let hextets: number[] = []
+  if (halves.length === 2) {
+    const left = halves[0] ? halves[0].split(":") : []
+    const right = halves[1] ? halves[1].split(":") : []
+    if (left.length + right.length >= 8) return null
+    const fill = 8 - left.length - right.length
+    hextets = [...left, ...Array(fill).fill("0"), ...right].map((h) => parseInt(h || "0", 16))
+  } else {
+    const parts = ip.split(":")
+    if (parts.length !== 8) return null
+    hextets = parts.map((h) => parseInt(h || "0", 16))
   }
+  if (hextets.length !== 8 || hextets.some((h) => Number.isNaN(h))) return null
+  let v = 0n
+  for (const h of hextets) v = (v << 16n) | BigInt(h)
   return v
 }
 
-function findV6(ranges: V6Range[], ip: bigint): string | null {
-  for (const r of ranges) {
-    if (ip < r.start) return null
-    if (ip <= r.end) return r.name
+export function findV6(ranges: V6Range[], ip: bigint): string | null {
+  let lo = 0
+  let hi = ranges.length - 1
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1
+    const r = ranges[mid]
+    if (ip < r.start) hi = mid - 1
+    else if (ip > r.end) lo = mid + 1
+    else return r.name
   }
   return null
 }
