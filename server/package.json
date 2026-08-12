@@ -9,9 +9,11 @@
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node test/smoke.mjs",
-    "test:unit": "node --import tsx test/unit.mts",
+    "test:unit": "node --import tsx test/unit.mts && node --import tsx test/webhook.mts",
     "train:risk": "node scripts/train-risk-model.mjs",
-    "build:asn": "node scripts/build-asn.mjs"
+    "build:asn": "node scripts/build-asn.mjs",
+    "backup": "node scripts/backup.mjs",
+    "restore": "node scripts/restore.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

@@ -140,8 +140,16 @@ class LiveStripeProvider implements PaymentProvider {
   }
 }
 
-export function parseStripeWebhook(payload: string | Buffer, signature: string): Stripe.Event {
-  return getStripeClient().webhooks.constructEvent(payload, signature, config.stripeWebhookSecret)
+export function parseStripeWebhook(
+  payload: string | Buffer,
+  signature: string,
+  opts?: { secret?: string; apiKey?: string }
+): Stripe.Event {
+  const secret = opts?.secret ?? config.stripeWebhookSecret
+  const client = opts?.apiKey !== undefined || opts?.secret !== undefined
+    ? new Stripe(opts?.apiKey ?? config.stripeSecretKey)
+    : getStripeClient()
+  return client.webhooks.constructEvent(payload, signature, secret)
 }
 
 function getProvider(): PaymentProvider {
