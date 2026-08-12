@@ -199,13 +199,18 @@ Client updates are integrity-protected end-to-end:
 Shipped: ASN/DC reputation (multi-provider dataset — AWS, Google, Microsoft, Oracle,
 DigitalOcean — with enforcement), pluggable risk scoring (heuristic + trained logistic model
 behind one interface), graduated trust tiers with a human review queue, advertiser chargeback/
-Radar defense (dispute/refund webhooks), and a native Postgres runtime (async data-access layer +
-idempotent schema).
+Radar defense (dispute/refund webhooks), a native Postgres runtime (async data-access layer +
+idempotent schema), verified live Stripe webhook handling (signature check + every campaign
+and payout transition covered by `test/webhook.mts`), an admin review-queue UI (`/admin`),
+an ops surface (metrics endpoint, request logging, per-IP rate limiting, backup/restore
+scripts), a Docker deployment (single container serving the built dashboard + API, with a
+Postgres service), and an auto-earn loop in the VS Code client.
 
 Remaining (all behind existing interfaces, no contract changes):
 - Replace the synthetic logistic weights in `server/assets/risk-model.json` with a model trained
   on labeled review-queue data. The trainer (`npm run train:risk -w server`) accepts real labels
   via `--data labeled.csv` (7 feature columns + `label`) and falls back to synthetic samples.
+  Real labels arrive once the review queue has production traffic (live Stripe spend).
 - Fold RIPE-announced prefixes for additional cloud ASNs into `server/assets/asn.json` where the
   RIPE Stat API is reachable (the builder already supports it). CI runs a freshness job
   (`npm run build:asn -w server`) that fails if the committed dataset is stale.

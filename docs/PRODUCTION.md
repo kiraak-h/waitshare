@@ -17,6 +17,11 @@ and fill in real values. The server validates configuration at startup:
 Run `npm run build -w server` and start with `NODE_ENV=production node server/dist/index.js`
 behind your load balancer / reverse proxy. Health check: `GET /api/v1/health`.
 
+The server also serves the built dashboard when `web/dist/index.html` exists
+(`WEB_DIST_DIR` overrides the path): `npm run build -w web`, then static assets
+are served at `/` with an SPA fallback for non-`/api` routes — one origin, no
+CORS surface. Docker does this automatically (see §8).
+
 ## 2. Payments (Stripe)
 
 Two flows use Stripe:
@@ -90,8 +95,10 @@ Supporting artifacts:
   `psql $DATABASE_URL -f dump.sql`.
 - The smoke suite runs against both drivers. Locally: `npm test -w server`
   (SQLite) and `DATABASE_URL=... npm test -w server` (Postgres). Unit tests
-  (`npm run test:unit -w server`) cover the SQL translation layer and the
-  risk-scoring helpers. CI runs a dedicated Postgres job.
+  (`npm run test:unit -w server`) cover the SQL translation layer, the
+  risk-scoring helpers, the ASN/IPv6 classifier, and — in `test/webhook.mts` —
+  Stripe webhook signature verification plus every campaign/payout transition
+  the live webhook handlers perform. CI runs a dedicated Postgres job.
 
 ## 6. CI
 
@@ -131,3 +138,44 @@ instance with `SMOKE_BASE_URL=http://localhost:3001/api/v1`.
   dataset is for internal fraud/abuse classification only and is not redistributed
   as a product. Regenerate with `npm run build:asn -w server`; CI can do so where
   those providers are reachable.
+
+## 8. Docker deployment
+
+A multi-stage `Dockerfile` (Node 22) builds server + web and serves both from one
+container; `docker-compose.yml` adds a managed Postgres 16 with health-gated
+startup:
+
+```bash
+cp .env.example .env   # set POSTGRES_PASSWORD, ADMIN_TOKEN, STRIPE_* as needed
+docker compose up -d --build
+```
+
+- The API listens on `:3001`; the built dashboard is served at `/` with an SPA
+  fallback, so a single origin (plus TLS at your reverse proxy) serves the whole
+  product.
+- `DATA_DIR` and the Postgres volume are persisted; `SEED_DEMO=0` is forced in
+  production and `STRIPE_MODE` defaults to `stub` so the container boots without
+  keys.
+- Health check: `GET /api/v1/health` (or `docker compose ps`).
+
+## 9. Operations
+
+- **Metrics.** `GET /api/v1/metrics` (requires `ADMIN_TOKEN` bearer) returns
+  process counters (serves issued, impressions credited/rejected, fraud events,
+  checkout sessions, webhook events, payouts cleared, uptime) plus DB-derived
+  figures (active campaigns, pending payout mills, 24h impressions, flagged devs)
+  and the locked split contract. Poll it into your monitoring system.
+- **Request logging.** Every request (except `/health`) logs
+  `METHOD path status duration-ms` to stdout — sufficient for access forensics;
+  combine with structured platform logging if you need log shipping.
+- **Rate limiting.** In-process fixed-window limiter per client IP. `POST /auth/*`
+  is limited to 120 req/min and `GET /ads/next` to 120 req/min; over-limit returns
+  `429` with `retryAfterMs`. `trust proxy` is set to one hop, so set it correctly
+  behind your reverse proxy to get real client IPs.
+- **Backups.** `npm run backup -w server` snapshots the datastore:
+  `pg_dump | gzip` when `DATABASE_URL` is set, otherwise a `better-sqlite3` online
+  backup of the SQLite file — both into `BACKUP_DIR` (default `<DATA_DIR>/backups`)
+  with timestamped names. Restore with `npm run restore -w server -- <file>`:
+  `.db` copies into `DATA_DIR`, `.sql`/`.sql.gz` pipes into `psql`. Stop the server
+  before restoring. Schedule backups with your platform cron; the script never
+  deletes old snapshots.
