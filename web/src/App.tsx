@@ -4,6 +4,7 @@ import Advertise from "./pages/Advertise"
 import Leaderboard from "./pages/Leaderboard"
 import Dashboard from "./pages/Dashboard"
 import Install from "./pages/Install"
+import Admin from "./pages/Admin"
 
 function Nav() {
   const linkClass = ({ isActive }: { isActive: boolean }) =>
@@ -31,6 +32,9 @@ function Nav() {
           <NavLink to="/dashboard" className={linkClass}>
             Earn
           </NavLink>
+          <NavLink to="/admin" className={linkClass}>
+            Admin
+          </NavLink>
         </nav>
       </div>
     </header>
@@ -48,6 +52,7 @@ export default function App() {
           <Route path="/leaderboard" element={<Leaderboard />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/install" element={<Install />} />
+          <Route path="/admin" element={<Admin />} />
         </Routes>
       </main>
       <footer className="footer">
