@@ -9,6 +9,8 @@ import { deriveNetworkSignals } from "../services/network.js"
 import { getServe, recordImpression, voidServe } from "../services/ledger.js"
 import { getSplitContract } from "../services/split.js"
 import { config } from "../config.js"
+import { inc } from "../services/metrics.js"
+import { rateLimit } from "../services/rate-limit.js"
 import { asyncHandler } from "../async-handler.js"
 
 export const adsRouter = Router()
@@ -24,6 +26,7 @@ async function getSessionDevId(req: Request): Promise<string | null> {
 
 adsRouter.get(
   "/next",
+  rateLimit({ windowMs: 60_000, max: 120 }),
   asyncHandler(async (req, res) => {
     const surface = String(req.query.surface ?? "")
     const deviceId = String(req.query.deviceId ?? "")
@@ -76,6 +79,7 @@ adsRouter.get(
       res.json({ ad: null })
       return
     }
+    inc("servesIssued")
 
     res.json({
       ad: {
@@ -171,6 +175,7 @@ adsRouter.post(
     const fraud = await checkImpressionEligibility(deviceId, durationMs, viewablePct, focusPct, fleet)
     if (!fraud.allowed) {
       await voidServe(serveId)
+      inc("impressionsRejected")
       res.status(422).json({ error: "impression rejected", reason: fraud.reason })
       return
     }
@@ -185,6 +190,7 @@ adsRouter.post(
         reason: `high risk score ${scored.score}`,
       })
       if (devId) await db.run("UPDATE devs SET fraud_flags = fraud_flags + 1 WHERE id = ?", [devId])
+      inc("impressionsRejected")
       res.status(422).json({ error: "impression rejected", reason: `high risk score ${scored.score}` })
       return
     }
@@ -211,6 +217,7 @@ adsRouter.post(
       ipHash: signals.ipHash,
       signature,
     })
+    inc("impressionsCredited")
 
     const split = await getSplitContract()
     if (devId) await updateTrustTier(devId)

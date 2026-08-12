@@ -42,6 +42,7 @@ export const config = {
   port: Number(process.env.PORT ?? 3001),
   host: process.env.HOST ?? "0.0.0.0",
   dataDir: process.env.DATA_DIR ?? path.resolve(import.meta.dirname, "../data"),
+  webDistDir: process.env.WEB_DIST_DIR ?? path.resolve(import.meta.dirname, "../../web/dist"),
   publicBaseUrl: process.env.PUBLIC_BASE_URL ?? "http://localhost:3001",
   webBaseUrl: process.env.WEB_BASE_URL ?? "http://localhost:5173",
   stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? "",

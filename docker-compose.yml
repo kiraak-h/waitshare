@@ -1,0 +1,42 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: waitshare
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-waitshare}
+      POSTGRES_DB: waitshare
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U waitshare -d waitshare"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build: .
+    ports:
+      - "${PORT:-3001}:3001"
+    environment:
+      NODE_ENV: production
+      SEED_DEMO: "0"
+      PORT: "3001"
+      DATABASE_URL: postgres://waitshare:${POSTGRES_PASSWORD:-waitshare}@db:5432/waitshare
+      DATA_DIR: /app/server/data
+      STRIPE_MODE: ${STRIPE_MODE:-stub}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3001}
+      WEB_BASE_URL: ${WEB_BASE_URL:-http://localhost:3001}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      FRAUD_SALT: ${FRAUD_SALT:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - appdata:/app/server/data
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  appdata:
