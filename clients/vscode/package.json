@@ -25,6 +25,10 @@
         "title": "WaitShare: Start sponsored line"
       },
       {
+        "command": "waitshare.toggleAuto",
+        "title": "WaitShare: Toggle auto-earn"
+      },
+      {
         "command": "waitshare.report",
         "title": "WaitShare: Report impression"
       },

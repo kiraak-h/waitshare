@@ -3,6 +3,7 @@ import { z } from "zod"
 import { db } from "../db.js"
 import { payments } from "../services/payments.js"
 import { config } from "../config.js"
+import { inc } from "../services/metrics.js"
 import { asyncHandler } from "../async-handler.js"
 import { randomUUID } from "node:crypto"
 
@@ -74,6 +75,7 @@ advertiserRouter.post(
       successUrl: `${config.webBaseUrl}/advertise?paid=1&campaign=${campaignId}`,
       cancelUrl: `${config.webBaseUrl}/advertise?paid=0`,
     })
+    inc("checkoutSessions")
 
     res.json({ campaignId, checkoutUrl: checkout.url, amountCents, mode: payments.mode })
   })

@@ -2,6 +2,7 @@ import { db } from "../db.js"
 import { config } from "../config.js"
 import { pendingServeCount } from "./auction.js"
 import { computeTrustTier, trustCaps } from "./scoring.js"
+import { inc } from "./metrics.js"
 
 export interface FraudDecision {
   allowed: boolean
@@ -25,6 +26,7 @@ export async function logFraudEvent(
     "INSERT INTO fraud_events (type, dev_id, device_id, network_hash, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)",
     [type, opts.devId ?? null, opts.deviceId ?? null, opts.networkHash ?? null, opts.reason, Date.now()]
   )
+  inc("fraudEvents")
 }
 
 export async function logFleetEventOnce(ctx: FleetContext, reason: string): Promise<void> {

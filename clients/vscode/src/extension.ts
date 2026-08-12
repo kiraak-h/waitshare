@@ -7,11 +7,14 @@ import { exec } from "node:child_process"
 
 const SURFACE = "vscode"
 const MIN_DURATION_MS = 10_000
+const MAX_AUTO_MS = 120_000
+const AUTO_TICK_MS = 5_000
 const VERSION = "0.1.0"
 
 const home = () => path.join(os.homedir(), ".waitshare")
 const configPath = () => path.join(home(), "config.json")
 const currentPath = () => path.join(home(), "current.json")
+const autoPath = () => path.join(home(), "auto.json")
 const downloadsDir = () => path.join(home(), "downloads")
 
 interface Config {
@@ -37,6 +40,19 @@ function signPayload(payload: Record<string, unknown>, privateKeyB64: string): s
     type: "pkcs8",
   })
   return crypto.sign(null, Buffer.from(JSON.stringify(payload)), key).toString("base64")
+}
+
+function loadAuto(): boolean {
+  try {
+    return JSON.parse(fs.readFileSync(autoPath(), "utf8")).enabled !== false
+  } catch {
+    return true
+  }
+}
+
+function saveAuto(enabled: boolean): void {
+  fs.mkdirSync(home(), { recursive: true })
+  fs.writeFileSync(autoPath(), JSON.stringify({ enabled }))
 }
 
 async function fetchAd(config: Config): Promise<{ serveId: string; adLine: string; nonce: string } | null> {
@@ -132,6 +148,52 @@ export function activate(context: vscode.ExtensionContext) {
   render()
   watchCurrent()
 
+  let autoEnabled = loadAuto()
+  let autoTimer: ReturnType<typeof setInterval> | null = null
+  let reporting = false
+  let lastAdAttempt = 0
+
+  async function beginAd() {
+    const cfg = loadConfig()
+    if (!cfg) return
+    const ad = await fetchAd(cfg)
+    if (!ad) return
+    fs.mkdirSync(home(), { recursive: true })
+    focusMs = 0
+    lastFocusChange = Date.now()
+    windowFocused = vscode.window.state.focused
+    fs.writeFileSync(currentPath(), JSON.stringify({ ...ad, startedAt: Date.now() }))
+    render()
+  }
+
+  async function tick() {
+    if (!autoEnabled || reporting) return
+    const cfg = loadConfig()
+    if (!cfg) return
+    if (fs.existsSync(currentPath())) {
+      try {
+        const cur = JSON.parse(fs.readFileSync(currentPath(), "utf8")) as { startedAt: number }
+        const elapsed = Date.now() - cur.startedAt
+        if (elapsed >= MIN_DURATION_MS && (!vscode.window.state.focused || elapsed >= MAX_AUTO_MS)) {
+          reporting = true
+          try {
+            await reportImpression(cfg, focusMs, vscode.window.state.focused, lastFocusChange)
+            await beginAd()
+          } finally {
+            reporting = false
+          }
+        }
+      } catch {
+        /* transient errors are fine — next tick retries */
+      }
+    } else if (vscode.window.state.focused && Date.now() - lastAdAttempt >= 60_000) {
+      lastAdAttempt = Date.now()
+      await beginAd()
+    }
+  }
+
+  autoTimer = setInterval(() => void tick(), AUTO_TICK_MS)
+
   const statusCmd = vscode.commands.registerCommand("waitshare.status", async () => {
     const config = loadConfig()
     if (!config) {
@@ -143,23 +205,24 @@ export function activate(context: vscode.ExtensionContext) {
     const state = fs.existsSync(currentPath())
       ? `showing sponsored line`
       : `idle (no active ad)`
-    vscode.window.showInformationMessage(`WaitShare: ${state} · device ${config.deviceId.slice(0, 8)}…`)
+    vscode.window.showInformationMessage(
+      `WaitShare: ${state} · device ${config.deviceId.slice(0, 8)}… · auto-earn ${autoEnabled ? "on" : "off"}`
+    )
+  })
+
+  const toggleAutoCmd = vscode.commands.registerCommand("waitshare.toggleAuto", () => {
+    autoEnabled = !autoEnabled
+    saveAuto(autoEnabled)
+    vscode.window.showInformationMessage(`WaitShare: auto-earn ${autoEnabled ? "ON" : "OFF"}`)
   })
 
   const startCmd = vscode.commands.registerCommand("waitshare.start", async () => {
-    const config = loadConfig()
-    if (!config) return
-    const ad = await fetchAd(config)
-    if (!ad) {
+    if (!loadConfig()) return
+    const hadAd = fs.existsSync(currentPath())
+    await beginAd()
+    if (!hadAd && !fs.existsSync(currentPath())) {
       vscode.window.showInformationMessage("WaitShare: no ads available on this surface right now")
-      return
     }
-    fs.mkdirSync(home(), { recursive: true })
-    focusMs = 0
-    lastFocusChange = Date.now()
-    windowFocused = vscode.window.state.focused
-    fs.writeFileSync(currentPath(), JSON.stringify({ ...ad, startedAt: Date.now() }))
-    render()
   })
 
   const reportCmd = vscode.commands.registerCommand("waitshare.report", async () => {
@@ -257,8 +320,9 @@ export function activate(context: vscode.ExtensionContext) {
     }
   })
 
-  context.subscriptions.push(bar, statusCmd, startCmd, reportCmd, verifyCmd, updateCmd, focusListener, {
+  context.subscriptions.push(bar, statusCmd, toggleAutoCmd, startCmd, reportCmd, verifyCmd, updateCmd, focusListener, {
     dispose: () => {
+      if (autoTimer) clearInterval(autoTimer)
       if (watcher) watcher.close()
       if (debounce) clearTimeout(debounce)
     },

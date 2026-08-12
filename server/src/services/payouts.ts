@@ -1,6 +1,7 @@
 import { db } from "../db.js"
 import { config } from "../config.js"
 import { payments } from "./payments.js"
+import { inc } from "./metrics.js"
 
 export interface PayoutRow {
   id: string
@@ -51,6 +52,7 @@ export async function processHeldPayouts(): Promise<{ processed: number; failed:
     } else {
       await db.run("UPDATE payouts SET status = 'cleared', cleared_at = ? WHERE id = ?", [now, p.id])
       await db.run("UPDATE devs SET paid_mills = paid_mills + ? WHERE id = ?", [p.amount_mills, p.dev_id])
+      inc("payoutsCleared")
       processed++
     }
   }

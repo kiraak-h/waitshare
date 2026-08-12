@@ -201,6 +201,20 @@ body {
 .btn-block {
   width: 100%;
 }
+.btn-sm {
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 8px;
+}
+.btn-danger {
+  background: transparent;
+  color: #e5484d;
+  border-color: #e5484d;
+}
+.btn-danger:hover {
+  background: #e5484d;
+  color: #fff;
+}
 .form-divider {
   display: flex;
   align-items: center;
@@ -587,9 +601,21 @@ body {
 }
 .badge-voided,
 .badge-blocked,
-.badge-refunded {
+.badge-refunded,
+.badge-suspended,
+.badge-failed {
   background: rgba(255, 92, 92, 0.15);
   color: var(--red);
+}
+.badge-review,
+.badge-held,
+.badge-pending {
+  background: rgba(255, 212, 0, 0.15);
+  color: var(--accent-2);
+}
+.badge-cleared {
+  background: rgba(61, 220, 132, 0.15);
+  color: var(--green);
 }
 
 /* Tables */
