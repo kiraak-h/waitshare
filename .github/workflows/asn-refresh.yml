@@ -1,0 +1,43 @@
+name: asn refresh
+
+on:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build:asn -w server
+      - name: Open PR if the dataset changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet server/assets/asn.json; then
+            echo "asn.json is up to date; nothing to do"
+            exit 0
+          fi
+          BR="asn/auto-$(date +%Y%m%d-%H%M%S)"
+          git checkout -b "$BR"
+          git add server/assets/asn.json
+          git -c user.name="waitshare-ops" -c user.email="waitshare-ops@users.noreply.github.com" \
+            commit -m "chore(asn): refresh cloud-IP dataset from RIPE"
+          git push -u origin "$BR"
+          gh pr create \
+            --base main \
+            --head "$BR" \
+            --title "chore(asn): refresh cloud-IP dataset from RIPE" \
+            --body "Automated refresh of server/assets/asn.json from RIPE announced prefixes.
+
+Merging triggers the push-to-main asn freshness check in ci.yml, which validates the committed dataset against a fresh build."

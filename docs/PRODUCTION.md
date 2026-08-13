@@ -150,14 +150,19 @@ Supporting artifacts:
   tier-2/3 fraud signals → admin review).
 - `server-postgres` job: same smoke test against a `postgres:15` service
   container via `DATABASE_URL`.
-- `asn` job: regenerates the cloud-IP dataset with `npm run build:asn -w server`
-  and fails if the committed `server/assets/asn.json` is stale (keeps the
-  dataset tracking provider range changes; run locally where RIPE Stat is
-  unreachable and commit the result).
+- `asn` job (push to `main` only): regenerates the cloud-IP dataset with
+  `npm run build:asn -w server` and fails if the committed `server/assets/asn.json`
+  is stale — a gate that keeps the dataset tracking provider range changes. A
+  separate scheduled workflow (`.github/workflows/asn-refresh.yml`) opens a PR
+  with the regenerated dataset when RIPE announce drift occurs, so the refresh
+  is automated instead of failing CI.
 - `web` job: `npm ci`, typecheck, build.
 - `docker` job: validates `docker compose config` and builds the image with
   `docker build` — exercises the multi-stage Dockerfile (alpine + native deps)
   and the compose wiring without needing a local Docker daemon.
+- `vscode` job: `npm ci` in `clients/vscode`, then typechecks and packages the
+  extension (`vsce`). A separate tag-triggered `ovsx-publish` workflow publishes
+  the extension to Open VSX when `OVSX_PAT` is configured.
 
 The smoke test also runs locally: `npm test -w server`, or against a running
 instance with `SMOKE_BASE_URL=http://localhost:3001/api/v1`.

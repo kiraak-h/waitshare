@@ -44,3 +44,7 @@ npm ci
 npm run build     # tsc -> dist/
 npm run package   # build + vsce package -> .vsix
 ```
+
+Publishing to [Open VSX](https://open-vsx.org) happens automatically on `v*`
+tags via the `ovsx-publish` workflow (requires the `OVSX_PAT` repository
+secret). Manual: `OVSX_PAT=<token> npm run publish:ovsx`.

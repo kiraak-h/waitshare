@@ -142,9 +142,10 @@ Impression integrity beyond signatures:
   accounts get reduced hourly/daily caps plus a `TIER0_PAYOUT_CAP_CENTS` payout gate. Admins
   clear/review/suspend via `/api/v1/admin/review`.
 - **Advertiser chargeback defense (Tier 4).** Live checkout runs Stripe Radar on every charge;
-  `charge.dispute.created` / `charge.dispute.closed` / `charge.refunded` webhooks flip the
-  campaign to `disputed` / `refunded` (delivery stops) and log a `chargeback` row in
-  `fraud_events` for operator review.
+  `charge.dispute.created` stops delivery and logs a `chargeback` row in `fraud_events`;
+  `charge.dispute.closed` reactivates the campaign if the dispute is `won` (and audits the
+  resolution) or leaves it `disputed` if lost; `charge.refunded` flips the campaign to
+  `refunded`.
 
 ## Signed updates
 
@@ -199,18 +200,18 @@ Client updates are integrity-protected end-to-end:
 Shipped: ASN/DC reputation (multi-provider dataset — AWS, Google, Microsoft, Oracle,
 DigitalOcean — with enforcement), pluggable risk scoring (heuristic + trained logistic model
 behind one interface), graduated trust tiers with a human review queue, advertiser chargeback/
-Radar defense (dispute/refund webhooks), a native Postgres runtime (async data-access layer +
-idempotent schema), verified live Stripe webhook handling (signature check + every campaign
-and payout transition covered by `test/webhook.mts`), an admin review-queue UI (`/admin`),
-an ops surface (metrics endpoint, request logging, per-IP rate limiting, backup/restore
-scripts), a Docker deployment (single container serving the built dashboard + API, with a
-Postgres service), and an auto-earn loop in the VS Code client.
+Radar defense (dispute/refund webhooks, including dispute-won reactivation), a native Postgres
+runtime (async data-access layer + idempotent schema), verified live Stripe webhook handling
+(signature check + every campaign and payout transition covered by `test/webhook.mts`), an
+admin review-queue UI (`/admin` with label filters, pagination, and per-dev fraud timelines),
+per-dev fraud review labels (bucket counts per signal in `fraud_labels`), an ops surface
+(metrics endpoint, request logging, per-IP rate limiting, backup/restore scripts), a Docker
+deployment (single container serving the built dashboard + API, with a Postgres service),
+CI validation of the Docker build and VS Code extension packaging, an auto-earn loop in the
+VS Code client, and automated Open VSX publishing on version tags.
 
 Remaining (all behind existing interfaces, no contract changes):
 - Replace the synthetic logistic weights in `server/assets/risk-model.json` with a model trained
   on labeled review-queue data. The trainer (`npm run train:risk -w server`) accepts real labels
   via `--data labeled.csv` (7 feature columns + `label`) and falls back to synthetic samples.
   Real labels arrive once the review queue has production traffic (live Stripe spend).
-- Fold RIPE-announced prefixes for additional cloud ASNs into `server/assets/asn.json` where the
-  RIPE Stat API is reachable (the builder already supports it). CI runs a freshness job
-  (`npm run build:asn -w server`) that fails if the committed dataset is stale.
