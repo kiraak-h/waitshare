@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS devs (
   stripe_account_id TEXT,
   stripe_onboarded INTEGER NOT NULL DEFAULT 0,
   fraud_flags INTEGER NOT NULL DEFAULT 0,
+  fraud_labels TEXT NOT NULL DEFAULT '{}',
   trust_tier INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL
 );
@@ -183,6 +184,7 @@ class SqliteDriver implements DbDriver {
     ensureColumnSq(raw, "impressions", "focus_pct", "focus_pct INTEGER NOT NULL DEFAULT 100")
     ensureColumnSq(raw, "devs", "reserve_mills", "reserve_mills INTEGER NOT NULL DEFAULT 0")
     ensureColumnSq(raw, "devs", "fraud_flags", "fraud_flags INTEGER NOT NULL DEFAULT 0")
+    ensureColumnSq(raw, "devs", "fraud_labels", "fraud_labels TEXT NOT NULL DEFAULT '{}'")
     ensureColumnSq(raw, "devs", "trust_tier", "trust_tier INTEGER NOT NULL DEFAULT 0")
     ensureColumnSq(raw, "impressions", "reserved_mills", "reserved_mills INTEGER NOT NULL DEFAULT 0")
     ensureColumnSq(raw, "impressions", "reserve_released_at", "reserve_released_at INTEGER")

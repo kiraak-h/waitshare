@@ -25,12 +25,13 @@ adminRouter.get(
         email: string
         status: string
         fraud_flags: number
+        fraud_labels: string | null
         trust_tier: number
         created_at: number
         impressions: number
         earned_mills: number
       }>(
-        "SELECT DISTINCT d.id, d.email, d.status, d.fraud_flags, d.trust_tier, d.created_at, " +
+        "SELECT DISTINCT d.id, d.email, d.status, d.fraud_flags, d.fraud_labels, d.trust_tier, d.created_at, " +
           "(SELECT COUNT(*) FROM impressions i WHERE i.dev_id = d.id) AS impressions, " +
           "(SELECT COALESCE(SUM(dev_share_mills), 0) FROM impressions i WHERE i.dev_id = d.id) AS earned_mills " +
           "FROM devs d WHERE d.fraud_flags > 0 OR EXISTS " +
@@ -45,16 +46,25 @@ adminRouter.get(
     ])
 
     res.json({
-      devs: flagged.map((d) => ({
-        id: d.id,
-        email: d.email,
-        status: d.status,
-        fraudFlags: d.fraud_flags,
-        trustTier: d.trust_tier,
-        impressions: d.impressions,
-        earnedCents: Math.floor(d.earned_mills / 100),
-        createdAt: d.created_at,
-      })),
+      devs: flagged.map((d) => {
+        let fraudLabels: Record<string, number> = {}
+        try {
+          fraudLabels = JSON.parse(d.fraud_labels ?? "{}")
+        } catch {
+          fraudLabels = {}
+        }
+        return {
+          id: d.id,
+          email: d.email,
+          status: d.status,
+          fraudFlags: d.fraud_flags,
+          fraudLabels,
+          trustTier: d.trust_tier,
+          impressions: d.impressions,
+          earnedCents: Math.floor(d.earned_mills / 100),
+          createdAt: d.created_at,
+        }
+      }),
       events: events.map((e) => ({
         id: e.id,
         type: e.type,
@@ -93,7 +103,8 @@ adminRouter.post(
     if (parsed.data.action === "review") status = "review"
     if (parsed.data.action === "suspend") status = "suspended"
 
-    await db.run("UPDATE devs SET status = ?, fraud_flags = 0 WHERE id = ?", [status, devId])
+    const resetLabels = parsed.data.action === "clear" ? ", fraud_labels = '{}'" : ""
+    await db.run(`UPDATE devs SET status = ?, fraud_flags = 0${resetLabels} WHERE id = ?`, [status, devId])
     res.json({ ok: true, devId, status })
   })
 )
