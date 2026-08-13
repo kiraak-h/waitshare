@@ -742,3 +742,51 @@ body {
     display: none;
   }
 }
+
+/* Admin review queue */
+.field-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.field-inline select {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+.expander {
+  margin-right: 8px;
+  min-width: 28px;
+  padding: 0 6px;
+}
+.cell-inline {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 8px;
+}
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+.timeline-row td {
+  background: rgba(255, 255, 255, 0.02);
+}
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 8px;
+}
+.timeline-item {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  font-size: 13px;
+}
