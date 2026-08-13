@@ -4,6 +4,10 @@
   "description": "Get paid for waiting. Privacy-first sponsored lines in your AI coding tools. 60% to developers, locked.",
   "version": "0.1.0",
   "publisher": "waitshare",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kiraak-h/waitshare"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -50,6 +54,7 @@
   "devDependencies": {
     "@types/node": "^22.10.5",
     "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.2.1",
     "typescript": "^5.7.3"
   }
 }

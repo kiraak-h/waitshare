@@ -95,3 +95,27 @@ jobs:
       - run: npm ci
       - run: npm run typecheck -w web
       - run: npm run build -w web
+
+  docker:
+    name: docker (build, compose config)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose config -q
+      - name: Build image
+        run: docker build -t waitshare:ci .
+
+  vscode:
+    name: vscode extension (typecheck, package)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: clients/vscode/package-lock.json
+      - working-directory: clients/vscode
+        run: npm ci
+      - working-directory: clients/vscode
+        run: npm run package
