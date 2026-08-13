@@ -97,6 +97,34 @@ await t("webhook: charge.dispute.created stops a campaign and audits it", async 
   assert.ok(Number(fe?.n) >= 1)
 })
 
+await t("webhook: charge.dispute.closed with status won reactivates a campaign", async () => {
+  const now = Date.now()
+  await db.run(
+    `INSERT INTO campaigns ${CAMP_COLS} VALUES (?, 'adv1', 'DispWon', 'https://example.com', 'opencode', 300, 5, 5000, 'disputed', 'pi_dispwon', ?, ?)`,
+    ["c-dispwon", now, now]
+  )
+  await applyStripeEvent(
+    event("charge.dispute.closed", { id: "dp_won", payment_intent: "pi_dispwon", status: "won" } as unknown as Stripe.Dispute)
+  )
+  const row = await db.get<{ status: string }>("SELECT status FROM campaigns WHERE id = ?", ["c-dispwon"])
+  assert.strictEqual(row?.status, "active")
+  const fe = await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM fraud_events WHERE type = 'dispute-won'")
+  assert.ok(Number(fe?.n) >= 1)
+})
+
+await t("webhook: charge.dispute.closed with status lost keeps a campaign disputed", async () => {
+  const now = Date.now()
+  await db.run(
+    `INSERT INTO campaigns ${CAMP_COLS} VALUES (?, 'adv1', 'DispLost', 'https://example.com', 'opencode', 300, 5, 5000, 'disputed', 'pi_displost', ?, ?)`,
+    ["c-displost", now, now]
+  )
+  await applyStripeEvent(
+    event("charge.dispute.closed", { id: "dp_lost", payment_intent: "pi_displost", status: "lost" } as unknown as Stripe.Dispute)
+  )
+  const row = await db.get<{ status: string }>("SELECT status FROM campaigns WHERE id = ?", ["c-displost"])
+  assert.strictEqual(row?.status, "disputed")
+})
+
 await t("webhook: charge.refunded flips a campaign to refunded", async () => {
   const now = Date.now()
   await db.run(

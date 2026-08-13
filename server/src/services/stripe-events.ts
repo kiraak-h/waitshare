@@ -2,7 +2,6 @@ import type Stripe from "stripe"
 import { db } from "../db.js"
 import { inc } from "./metrics.js"
 import { logFraudEvent } from "./fraud.js"
-
 export async function applyStripeEvent(event: Stripe.Event): Promise<void> {
   inc("webhookEvents")
   switch (event.type) {
@@ -33,6 +32,28 @@ export async function applyStripeEvent(event: Stripe.Event): Promise<void> {
         await db.run("UPDATE campaigns SET status = 'disputed', updated_at = ? WHERE id = ?", [Date.now(), campaign.id])
         await logFraudEvent("chargeback", {
           reason: `advertiser dispute ${dispute.id} on campaign ${campaign.id}`,
+        })
+      }
+      break
+    }
+    case "charge.dispute.closed": {
+      // The advertiser's dispute resolved. Won: delivery resumes (campaign
+      // back to active) and the resolution is audited. Lost: the chargeback
+      // stands — the campaign stays 'disputed' until Stripe refunds via
+      // charge.refunded.
+      const closedDispute = event.data.object as Stripe.Dispute
+      const paymentIntentId =
+        typeof closedDispute.payment_intent === "string"
+          ? closedDispute.payment_intent
+          : (closedDispute.charge as string) ?? null
+      const campaign = await db.get<{ id: string }>(
+        "SELECT id FROM campaigns WHERE payment_intent_id = ? OR stripe_checkout_id = ? LIMIT 1",
+        [paymentIntentId, paymentIntentId]
+      )
+      if (campaign && closedDispute.status === "won") {
+        await db.run("UPDATE campaigns SET status = 'active', updated_at = ? WHERE id = ?", [Date.now(), campaign.id])
+        await logFraudEvent("dispute-won", {
+          reason: `dispute ${closedDispute.id} won, campaign ${campaign.id} reactivated`,
         })
       }
       break
