@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react"
+import { useEffect, useMemo, useState, type FormEvent } from "react"
 import { api } from "../api"
 import { formatDate, millsToDollars, timeAgo } from "../utils"
 
@@ -32,12 +32,24 @@ interface FraudEvent {
 interface Review {
   devs: ReviewDev[]
   events: FraudEvent[]
+  total: number
 }
+
+interface DevTimeline {
+  dev: ReviewDev
+  events: FraudEvent[]
+}
+
+const PAGE = 50
 
 export default function Admin() {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem("ws_admin_token"))
   const [overview, setOverview] = useState<Overview | null>(null)
   const [review, setReview] = useState<Review | null>(null)
+  const [filter, setFilter] = useState<string>("")
+  const [offset, setOffset] = useState(0)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [timeline, setTimeline] = useState<DevTimeline | null>(null)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -47,9 +59,11 @@ export default function Admin() {
     setBusy(true)
     setErr(null)
     try {
+      const params = new URLSearchParams({ limit: String(PAGE), offset: String(offset) })
+      if (filter) params.set("label", filter)
       const [o, r] = await Promise.all([
         api<Overview>("/admin/overview", {}, token),
-        api<Review>("/admin/review", {}, token),
+        api<Review>(`/admin/review?${params.toString()}`, {}, token),
       ])
       setOverview(o)
       setReview(r)
@@ -62,12 +76,23 @@ export default function Admin() {
 
   useEffect(() => {
     void load()
-  }, [token])
+  }, [token, filter, offset])
+
+  async function loadTimeline(devId: string) {
+    if (!token) return
+    setErr(null)
+    try {
+      const t = await api<DevTimeline>(`/admin/review/${devId}`, {}, token)
+      setTimeline(t)
+      setExpandedId(devId)
+    } catch (e) {
+      setErr(String(e))
+    }
+  }
 
   function save(e: FormEvent) {
     e.preventDefault()
     localStorage.setItem("ws_admin_token", token ?? "")
-    setMsg("Admin token saved. Reloading…")
     setToken(token)
     setMsg(null)
     void load()
@@ -84,6 +109,16 @@ export default function Admin() {
       setErr(String(e))
     }
   }
+
+  const labelOptions = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const d of review?.devs ?? []) {
+      for (const [label, n] of Object.entries(d.fraudLabels ?? {})) {
+        counts.set(label, (counts.get(label) ?? 0) + n)
+      }
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1])
+  }, [review])
 
   if (!token) {
     return (
@@ -151,60 +186,77 @@ export default function Admin() {
       {err && <p className="error">{err}</p>}
 
       <section className="section">
-        <h2 className="section-title">Flagged developers</h2>
+        <div className="row-split">
+          <h2 className="section-title">Flagged developers</h2>
+          <div className="action-row">
+            <label className="field-inline">
+              <span className="muted">Label</span>
+              <select value={filter} onChange={(e) => setFilter(e.target.value)}>
+                <option value="">all</option>
+                {labelOptions.map(([label]) => (
+                  <option key={label} value={label}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <span className="muted">
+              {review?.total ?? 0} devs
+            </span>
+          </div>
+        </div>
         {!review || review.devs.length === 0 ? (
           <p className="muted">No flagged developers right now. Fraud events from all tiers show here.</p>
         ) : (
-          <div className="table-wrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Dev</th>
-                  <th>Status</th>
-                  <th className="num">Flags</th>
-                  <th className="num">Tier</th>
-                  <th className="num">Impr</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {review.devs.map((d) => (
-                  <tr key={d.id}>
-                    <td>
-                      <div>{d.email}</div>
-                      <div className="muted mono" title={formatDate(d.createdAt)}>
-                        {d.id.slice(0, 8)}… · {timeAgo(d.createdAt)}
-                      </div>
-                      {Object.entries(d.fraudLabels ?? {}).map(([label, n]) => (
-                        <span key={label} className="badge badge-fraud">
-                          {label} ×{n}
-                        </span>
-                      ))}
-                    </td>
-                    <td>
-                      <span className={`badge badge-${d.status}`}>{d.status}</span>
-                    </td>
-                    <td className="num">{d.fraudFlags}</td>
-                    <td className="num">{d.trustTier}</td>
-                    <td className="num">{d.impressions}</td>
-                    <td>
-                      <div className="action-row">
-                        <button className="btn btn-ghost btn-sm" onClick={() => act(d.id, "clear")}>
-                          Clear
-                        </button>
-                        <button className="btn btn-ghost btn-sm" onClick={() => act(d.id, "review")}>
-                          Review
-                        </button>
-                        <button className="btn btn-danger btn-sm" onClick={() => act(d.id, "suspend")}>
-                          Suspend
-                        </button>
-                      </div>
-                    </td>
+          <>
+            <div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Dev</th>
+                    <th>Status</th>
+                    <th className="num">Flags</th>
+                    <th className="num">Tier</th>
+                    <th className="num">Impr</th>
+                    <th>Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {review.devs.map((d) => (
+                    <FragmentRow
+                      key={d.id}
+                      dev={d}
+                      expanded={expandedId === d.id}
+                      timeline={expandedId === d.id ? timeline : null}
+                      onExpand={() => (expandedId === d.id ? setExpandedId(null) : void loadTimeline(d.id))}
+                      onAct={(a) => act(d.id, a)}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {(review.total > PAGE || offset > 0) && (
+              <div className="pager">
+                <button
+                  className="btn btn-ghost btn-sm"
+                  disabled={offset === 0}
+                  onClick={() => setOffset(Math.max(0, offset - PAGE))}
+                >
+                  Prev
+                </button>
+                <span className="muted">
+                  {offset + 1}–{Math.min(offset + PAGE, review.total)} of {review.total}
+                </span>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  disabled={offset + PAGE >= review.total}
+                  onClick={() => setOffset(offset + PAGE)}
+                >
+                  Next
+                </button>
+              </div>
+            )}
+          </>
         )}
       </section>
 
@@ -238,5 +290,80 @@ export default function Admin() {
         )}
       </section>
     </div>
+  )
+}
+
+function FragmentRow({
+  dev,
+  expanded,
+  timeline,
+  onExpand,
+  onAct,
+}: {
+  dev: ReviewDev
+  expanded: boolean
+  timeline: DevTimeline | null
+  onExpand: () => void
+  onAct: (action: string) => void
+}) {
+  return (
+    <>
+      <tr>
+        <td>
+          <button className="btn btn-ghost btn-sm expander" onClick={onExpand}>
+            {expanded ? "▾" : "▸"}
+          </button>
+          <div className="cell-inline">
+            <div>{dev.email}</div>
+            <div className="muted mono" title={formatDate(dev.createdAt)}>
+              {dev.id.slice(0, 8)}… · {timeAgo(dev.createdAt)}
+            </div>
+          </div>
+          {Object.entries(dev.fraudLabels ?? {}).map(([label, n]) => (
+            <span key={label} className="badge badge-fraud">
+              {label} ×{n}
+            </span>
+          ))}
+        </td>
+        <td>
+          <span className={`badge badge-${dev.status}`}>{dev.status}</span>
+        </td>
+        <td className="num">{dev.fraudFlags}</td>
+        <td className="num">{dev.trustTier}</td>
+        <td className="num">{dev.impressions}</td>
+        <td>
+          <div className="action-row">
+            <button className="btn btn-ghost btn-sm" onClick={() => onAct("clear")}>
+              Clear
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={() => onAct("review")}>
+              Review
+            </button>
+            <button className="btn btn-danger btn-sm" onClick={() => onAct("suspend")}>
+              Suspend
+            </button>
+          </div>
+        </td>
+      </tr>
+      {expanded && (
+        <tr className="timeline-row">
+          <td colSpan={6}>
+            <div className="timeline">
+              {timeline && timeline.events.length === 0 && <p className="muted">No fraud events for this dev.</p>}
+              {timeline?.events.map((e) => (
+                <div key={e.id} className="timeline-item">
+                  <span className="mono">{e.type}</span>
+                  <span className="muted" title={formatDate(e.createdAt)}>
+                    {timeAgo(e.createdAt)}
+                  </span>
+                  <span className="muted">{e.reason}</span>
+                </div>
+              ))}
+              {!timeline && <p className="muted">Loading…</p>}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   )
 }
