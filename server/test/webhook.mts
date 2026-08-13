@@ -17,6 +17,7 @@ process.env.SEED_DEMO = "0"
 const { db, initDb } = await import("../src/db.js")
 const { parseStripeWebhook } = await import("../src/services/payments.js")
 const { applyStripeEvent } = await import("../src/services/stripe-events.js")
+const { logFraudEvent } = await import("../src/services/fraud.js")
 
 const SECRET = "whsec_webhook_unit"
 
@@ -123,6 +124,28 @@ await t("webhook: transfer.created clears a payout and pays the dev", async () =
   assert.strictEqual(p?.status, "cleared")
   const d = await db.get<{ paid_mills: number }>("SELECT paid_mills FROM devs WHERE id = ?", ["d-tr"])
   assert.strictEqual(d?.paid_mills, 5000)
+})
+
+await t("webhook: logFraudEvent buckets fraud_labels per dev", async () => {
+  const now = Date.now()
+  await db.run(
+    "INSERT INTO devs (id, email, country, status, fraud_flags, created_at) VALUES (?, ?, 'US', 'active', 0, ?)",
+    ["d-lbl", "lbl@test.dev", now]
+  )
+  await logFraudEvent("tier3-reject", { devId: "d-lbl", reason: "high risk score 90" })
+  await logFraudEvent("tier3-reject", { devId: "d-lbl", reason: "high risk score 92" })
+  await logFraudEvent("tier2", { devId: "d-lbl", reason: "shared network flagged as farm" })
+  const row = await db.get<{ fraud_labels: string | null }>("SELECT fraud_labels FROM devs WHERE id = ?", ["d-lbl"])
+  assert.deepStrictEqual(JSON.parse(row?.fraud_labels ?? "{}"), { "risk-reject": 2, "fleet-farm": 1 })
+  const flags = await db.get<{ fraud_flags: number }>("SELECT fraud_flags FROM devs WHERE id = ?", ["d-lbl"])
+  assert.strictEqual(flags?.fraud_flags, 0)
+})
+
+await t("webhook: logFraudEvent without a dev id does not bump labels", async () => {
+  const before = await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM fraud_events")
+  await logFraudEvent("chargeback", { reason: "advertiser dispute dp_stub" })
+  const after = await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM fraud_events")
+  assert.strictEqual(Number(after?.n), Number(before?.n) + 1)
 })
 
 await db.close()

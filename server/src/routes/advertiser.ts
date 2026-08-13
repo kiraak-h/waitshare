@@ -4,6 +4,7 @@ import { db } from "../db.js"
 import { payments } from "../services/payments.js"
 import { config } from "../config.js"
 import { inc } from "../services/metrics.js"
+import { logFraudEvent } from "../services/fraud.js"
 import { asyncHandler } from "../async-handler.js"
 import { randomUUID } from "node:crypto"
 
@@ -131,10 +132,9 @@ if (config.stripeMode === "stub") {
       }
       if (event === "dispute") {
         await db.run("UPDATE campaigns SET status = 'disputed', updated_at = ? WHERE id = ?", [Date.now(), id])
-        await db.run(
-          "INSERT INTO fraud_events (type, dev_id, device_id, network_hash, reason, created_at) VALUES ('chargeback', NULL, NULL, NULL, ?, ?)",
-          [`stub dispute simulation on campaign ${id}`, Date.now()]
-        )
+        await logFraudEvent("chargeback", {
+          reason: `stub dispute simulation on campaign ${id}`,
+        })
       } else if (event === "refund") {
         await db.run("UPDATE campaigns SET status = 'refunded', updated_at = ? WHERE id = ?", [Date.now(), id])
       } else {

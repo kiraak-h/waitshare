@@ -3,6 +3,7 @@ import { toPgSql } from "../src/db.js"
 import { meanStd, cv, clamp01, extractFeatures } from "../src/services/scoring.js"
 import { HeuristicModel, LogisticModel, getRiskModel } from "../src/services/risk-model.js"
 import { parseV4, parseV6, ipv6ToBigInt, findV6 } from "../src/services/asn.js"
+import { fraudLabel } from "../src/services/fraud.js"
 
 let passed = 0
 let failed = 0
@@ -142,6 +143,20 @@ t("asn: findV6 binary search matches range", () => {
   assert.strictEqual(findV6(ranges, 1n), null)
   assert.strictEqual(findV6(ranges, 21n), null)
   assert.strictEqual(findV6(ranges, 500n), null)
+})
+
+// --- fraud review labels -----------------------------------------------------
+t("fraud: tier2 farm reason buckets to fleet-farm", () => {
+  assert.strictEqual(fraudLabel("tier2", "shared network flagged as farm"), "fleet-farm")
+})
+t("fraud: tier2 rotation reason buckets to fleet-rotation", () => {
+  assert.strictEqual(fraudLabel("tier2", "device rotated too many networks"), "fleet-rotation")
+})
+t("fraud: other types bucket to stable labels", () => {
+  assert.strictEqual(fraudLabel("tier2-dc", "datacenter network not eligible"), "datacenter")
+  assert.strictEqual(fraudLabel("tier3-reject", "high risk score 88"), "risk-reject")
+  assert.strictEqual(fraudLabel("tier3-review", "review score 60"), "risk-review")
+  assert.strictEqual(fraudLabel("chargeback", "advertiser dispute dp_1"), "chargeback")
 })
 
 console.log(`\n${passed}/${passed + failed} unit checks passed`)

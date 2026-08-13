@@ -617,6 +617,13 @@ body {
   background: rgba(61, 220, 132, 0.15);
   color: var(--green);
 }
+.badge-fraud {
+  background: rgba(255, 140, 0, 0.12);
+  color: #ffb060;
+  text-transform: none;
+  margin-right: 4px;
+  margin-top: 4px;
+}
 
 /* Tables */
 .table-wrap {

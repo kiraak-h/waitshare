@@ -49,6 +49,46 @@ Setup:
 Until keys are present, `STRIPE_MODE=stub` exercises the entire marketplace with
 deterministic simulated URLs — useful for staging and CI.
 
+### Go-live checklist (test keys → live keys)
+
+Order matters; do it in a maintenance window and keep the dashboard in stub mode
+until the last step.
+
+1. **Create the Stripe account.** Sign up for Stripe, complete your business
+   profile, and enable *Checkout*, *Connect Express* (payouts), and *Radar*.
+   Connect Express requires platform approval for payouts and — if operating in
+   the EU — OSS/VAT registration.
+2. **Collect test keys.** From the dashboard: *Developers → API keys* for
+   `sk_test_*`, and *Developers → Webhooks* to create a webhook endpoint pointing
+   at `https://<host>/api/v1/webhooks` with the events below; copy the
+   `whsec_*` signing secret.
+3. **Run against test keys.** Set `STRIPE_MODE=live`, `STRIPE_SECRET_KEY=sk_test_*`,
+   `STRIPE_WEBHOOK_SECRET=whsec_*` on staging. Exercise the two flows end to end
+   with Stripe test cards: advertiser checkout → campaign activates on
+   `checkout.session.completed`; dev onboarding → Connect payout → `transfer.created`
+   clears the held payout. Send a `charge.dispute.created` from the dashboard and
+   confirm the campaign flips to `disputed` and a `chargeback` fraud event is
+   recorded.
+4. **Verify webhook delivery.** In the Stripe dashboard open *Webhooks →
+   your endpoint → Recent deliveries* and confirm `200` status, plus that the
+   signature timestamp tolerance (`parseStripeWebhook`) matches your clock.
+5. **Switch to live keys.** In the same maintenance window replace the secret and
+   webhook secret with `sk_live_*` / `whsec_*`, restart the server, and hit
+   `GET /api/v1/health`. Keep `STRIPE_MODE=live` from here on — stub-mode payment
+   simulation is no longer registered.
+6. **Smoke-test one real checkout.** Run a $1 campaign with the live secret and a
+   real card, confirm the campaign activates, then refund it and confirm the
+   `refunded` transition.
+7. **Monitor.** Watch `/api/v1/metrics` (checkout sessions, webhook events,
+   payouts cleared), the request log for webhook `4xx/5xx`, and the Stripe
+   dashboard's webhook failure page for 24h after cutover.
+
+Webhook events to register: `checkout.session.completed`, `account.updated`,
+`transfer.created`, `charge.dispute.created`, `charge.dispute.closed`,
+`charge.refunded`. If your reverse proxy terminates TLS, Stripe must reach the
+server on the webhook path (no IP allow-listing required; signatures are the
+authenticator).
+
 ## 3. Developer sign-in (Google OAuth)
 
 - Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
@@ -115,6 +155,9 @@ Supporting artifacts:
   dataset tracking provider range changes; run locally where RIPE Stat is
   unreachable and commit the result).
 - `web` job: `npm ci`, typecheck, build.
+- `docker` job: validates `docker compose config` and builds the image with
+  `docker build` — exercises the multi-stage Dockerfile (alpine + native deps)
+  and the compose wiring without needing a local Docker daemon.
 
 The smoke test also runs locally: `npm test -w server`, or against a running
 instance with `SMOKE_BASE_URL=http://localhost:3001/api/v1`.

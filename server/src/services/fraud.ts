@@ -18,15 +18,42 @@ export interface FleetContext {
   vpnThreshold: number
 }
 
+/** Coarse, operator-facing bucket for a fraud event (shown in the admin queue). */
+export function fraudLabel(type: string, reason: string): string {
+  if (type === "tier2") return /farm/i.test(reason) ? "fleet-farm" : "fleet-rotation"
+  if (type === "tier2-dc") return "datacenter"
+  if (type === "tier3-reject") return "risk-reject"
+  if (type === "tier3-review") return "risk-review"
+  if (type === "chargeback") return "chargeback"
+  return type
+}
+
+/** Increments the dev's per-label fraud counter (fraud_labels JSON bucket). */
+export async function bumpFraudLabel(devId: string, label: string): Promise<void> {
+  const row = await db.get<{ fraud_labels: string | null }>("SELECT fraud_labels FROM devs WHERE id = ?", [devId])
+  if (!row) return
+  let labels: Record<string, number> = {}
+  try {
+    labels = JSON.parse(row.fraud_labels ?? "{}")
+  } catch {
+    labels = {}
+  }
+  labels[label] = (labels[label] ?? 0) + 1
+  await db.run("UPDATE devs SET fraud_labels = ? WHERE id = ?", [JSON.stringify(labels), devId])
+}
+
 export async function logFraudEvent(
   type: string,
-  opts: { devId?: string | null; deviceId?: string | null; networkHash?: string | null; reason: string }
+  opts: { devId?: string | null; deviceId?: string | null; networkHash?: string | null; reason: string; label?: string }
 ): Promise<void> {
   await db.run(
     "INSERT INTO fraud_events (type, dev_id, device_id, network_hash, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)",
     [type, opts.devId ?? null, opts.deviceId ?? null, opts.networkHash ?? null, opts.reason, Date.now()]
   )
   inc("fraudEvents")
+  if (opts.devId) {
+    await bumpFraudLabel(opts.devId, opts.label ?? fraudLabel(type, opts.reason))
+  }
 }
 
 export async function logFleetEventOnce(ctx: FleetContext, reason: string): Promise<void> {

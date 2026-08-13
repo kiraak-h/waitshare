@@ -14,6 +14,7 @@ interface ReviewDev {
   email: string
   status: string
   fraudFlags: number
+  fraudLabels: Record<string, number>
   trustTier: number
   impressions: number
   earnedCents: number
@@ -174,6 +175,11 @@ export default function Admin() {
                       <div className="muted mono" title={formatDate(d.createdAt)}>
                         {d.id.slice(0, 8)}… · {timeAgo(d.createdAt)}
                       </div>
+                      {Object.entries(d.fraudLabels ?? {}).map(([label, n]) => (
+                        <span key={label} className="badge badge-fraud">
+                          {label} ×{n}
+                        </span>
+                      ))}
                     </td>
                     <td>
                       <span className={`badge badge-${d.status}`}>{d.status}</span>

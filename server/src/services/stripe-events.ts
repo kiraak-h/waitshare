@@ -1,6 +1,7 @@
 import type Stripe from "stripe"
 import { db } from "../db.js"
 import { inc } from "./metrics.js"
+import { logFraudEvent } from "./fraud.js"
 
 export async function applyStripeEvent(event: Stripe.Event): Promise<void> {
   inc("webhookEvents")
@@ -30,10 +31,9 @@ export async function applyStripeEvent(event: Stripe.Event): Promise<void> {
       )
       if (campaign) {
         await db.run("UPDATE campaigns SET status = 'disputed', updated_at = ? WHERE id = ?", [Date.now(), campaign.id])
-        await db.run(
-          "INSERT INTO fraud_events (type, dev_id, device_id, network_hash, reason, created_at) VALUES ('chargeback', NULL, NULL, NULL, ?, ?)",
-          [`advertiser dispute ${dispute.id} on campaign ${campaign.id}`, Date.now()]
-        )
+        await logFraudEvent("chargeback", {
+          reason: `advertiser dispute ${dispute.id} on campaign ${campaign.id}`,
+        })
       }
       break
     }
