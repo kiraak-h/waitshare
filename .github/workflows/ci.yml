@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "17 2 * * *"
 
 jobs:
   server:
@@ -50,6 +52,7 @@ jobs:
   asn:
     name: asn dataset (regenerate check)
     runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'push'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
