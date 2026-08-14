@@ -10,6 +10,8 @@ const CONFIG_PATH = path.join(HOME, "config.json")
 const CURRENT_PATH = path.join(HOME, "current.json")
 const SURFACE = "claude-code-cli"
 const MIN_DURATION_MS = 10_000
+const AUTO_TICK_MS = 5_000
+const MAX_AUTO_MS = 120_000
 const VERSION = "0.1.0"
 
 function readConfig() {
@@ -100,6 +102,24 @@ async function report() {
   }
 }
 
+async function autoEarn() {
+  const startedAt = Date.now()
+  console.error(`[waitshare] auto-earn running for up to ${MAX_AUTO_MS / 1000}s (Ctrl-C to stop)`)
+  while (Date.now() - startedAt <= MAX_AUTO_MS) {
+    if (fs.existsSync(CURRENT_PATH)) {
+      const current = JSON.parse(fs.readFileSync(CURRENT_PATH, "utf8"))
+      if (Date.now() - current.startedAt >= MIN_DURATION_MS) {
+        await report()
+        await start()
+      }
+    } else {
+      await start()
+    }
+    await new Promise((r) => setTimeout(r, AUTO_TICK_MS))
+  }
+  console.error("[waitshare] auto-earn session cap reached")
+}
+
 async function update() {
   const config = readConfig()
   try {
@@ -125,8 +145,9 @@ const cmd = process.argv[2]
 if (cmd === "start") await start()
 else if (cmd === "status") status()
 else if (cmd === "report") await report()
+else if (cmd === "auto") await autoEarn()
 else if (cmd === "update") await update()
 else {
-  console.error("usage: waitshare.mjs <start|status|report|update>")
+  console.error("usage: waitshare.mjs <start|status|report|auto|update>")
   process.exit(1)
 }

@@ -6,6 +6,8 @@ import nodeCrypto from "node:crypto"
 const CONFIG_PATH = path.join(os.homedir(), ".waitshare", "config.json")
 const SURFACE = "opencode"
 const MIN_DURATION_MS = 10_000
+const AUTO_TICK_MS = 5_000
+const MAX_AUTO_MS = 120_000
 const VERSION = "0.1.0"
 
 function b64decode(s: string): Uint8Array<ArrayBuffer> {
@@ -40,6 +42,9 @@ export const WaitSharePlugin = async ({ client }: { client: any }) => {
   let config: { api: string; token: string; deviceId: string; privateKeyB64: string } | null = null
   let active = false
   let serve: { serveId: string; adLine: string; nonce: string; startedAt: number } | null = null
+  let sessionStartedAt: number | null = null
+  let tickHandle: ReturnType<typeof setInterval> | null = null
+  let ticking = false
 
   try {
     if (fs.existsSync(CONFIG_PATH)) {
@@ -55,41 +60,19 @@ export const WaitSharePlugin = async ({ client }: { client: any }) => {
     )
   }
 
-  async function startRun() {
-    if (!config || active) return
-    active = true
-    try {
-      const res = await fetch(
-        `${config.api}/ads/next?surface=${SURFACE}&deviceId=${encodeURIComponent(config.deviceId)}`,
-        { headers: { authorization: `Bearer ${config.token}` } }
-      )
-      const body = await res.json()
-      if (body?.ad) {
-        serve = { serveId: body.ad.serveId, adLine: body.ad.adLine, nonce: body.ad.nonce, startedAt: Date.now() }
-        await client?.app?.log?.({
-          body: {
-            service: "waitshare",
-            level: "info",
-            message: `Sponsored · ${body.ad.adLine}`,
-            extra: { serveId: body.ad.serveId, surface: SURFACE },
-          },
-        })
-      }
-    } catch (e) {
-      console.error("[waitshare] ad fetch failed:", e)
+  function stopTicker() {
+    if (tickHandle) {
+      clearInterval(tickHandle)
+      tickHandle = null
     }
   }
 
-  async function endRun() {
-    if (!config || !active) return
-    active = false
-    if (!serve) return
+  async function reportServe() {
+    if (!config || !serve) return
     const { serveId, startedAt, nonce } = serve
     serve = null
-
     const durationMs = Date.now() - startedAt
     if (durationMs < MIN_DURATION_MS) return
-
     try {
       const payload = {
         serveId,
@@ -122,6 +105,58 @@ export const WaitSharePlugin = async ({ client }: { client: any }) => {
     } catch (e) {
       console.error("[waitshare] impression report failed:", e)
     }
+  }
+
+  async function fetchNext() {
+    if (!config) return
+    try {
+      const res = await fetch(
+        `${config.api}/ads/next?surface=${SURFACE}&deviceId=${encodeURIComponent(config.deviceId)}`,
+        { headers: { authorization: `Bearer ${config.token}` } }
+      )
+      const body = await res.json()
+      if (body?.ad) {
+        serve = { serveId: body.ad.serveId, adLine: body.ad.adLine, nonce: body.ad.nonce, startedAt: Date.now() }
+        await client?.app?.log?.({
+          body: {
+            service: "waitshare",
+            level: "info",
+            message: `Sponsored · ${body.ad.adLine}`,
+            extra: { serveId: body.ad.serveId, surface: SURFACE },
+          },
+        })
+      }
+    } catch (e) {
+      console.error("[waitshare] ad fetch failed:", e)
+    }
+  }
+
+  async function startRun() {
+    if (!config || active) return
+    active = true
+    await fetchNext()
+    sessionStartedAt = Date.now()
+    if (!tickHandle) {
+      tickHandle = setInterval(async () => {
+        if (!active || ticking) return
+        ticking = true
+        try {
+          if (serve && Date.now() - serve.startedAt >= MIN_DURATION_MS && Date.now() - (sessionStartedAt ?? Date.now()) <= MAX_AUTO_MS) {
+            await reportServe()
+            if (active) await fetchNext()
+          }
+        } finally {
+          ticking = false
+        }
+      }, AUTO_TICK_MS)
+    }
+  }
+
+  async function endRun() {
+    if (!config || !active) return
+    active = false
+    stopTicker()
+    await reportServe()
   }
 
   function isRunning(event: any): boolean {

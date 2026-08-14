@@ -146,6 +146,7 @@ adminRouter.post(
 
     const resetLabels = parsed.data.action === "clear" ? ", fraud_labels = '{}'" : ""
     await db.run(`UPDATE devs SET status = ?, fraud_flags = 0${resetLabels} WHERE id = ?`, [status, devId])
+    await db.run("INSERT INTO admin_actions (dev_id, action, created_at) VALUES (?, ?, ?)", [devId, parsed.data.action, Date.now()])
     res.json({ ok: true, devId, status })
   })
 )
