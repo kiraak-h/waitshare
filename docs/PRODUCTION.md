@@ -167,6 +167,14 @@ Supporting artifacts:
 The smoke test also runs locally: `npm test -w server`, or against a running
 instance with `SMOKE_BASE_URL=http://localhost:3001/api/v1`.
 
+Releases are fully automated by `.github/workflows/release.yml`. Pushing a
+`v*` tag triggers it to: build the frontend, assemble `waitshare.zip` from the
+tracked files (excluding `server/data/`), publish a GitHub Release with the zip
+and auto-generated notes, then push a `release/<tag>` branch carrying the
+force-added artifact, open a PR to `main`, and merge it. The PR step surfaces
+failures via `::error::` instead of swallowing them, so a broken tag push is
+visible in the Actions log.
+
 ## 7. Operational notes
 
 - **One exposed port.** The web dev server proxies `/api` to the backend
