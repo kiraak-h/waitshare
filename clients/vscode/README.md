@@ -48,3 +48,15 @@ npm run package   # build + vsce package -> .vsix
 Publishing to [Open VSX](https://open-vsx.org) happens automatically on `v*`
 tags via the `ovsx-publish` workflow (requires the `OVSX_PAT` repository
 secret). Manual: `OVSX_PAT=<token> npm run publish:ovsx`.
+
+### Setting up Open VSX publishing (one-time)
+
+1. Sign in to [open-vsx.org](https://open-vsx.org) with a GitHub account and
+   claim the namespace **`waitshare`** (must match the `publisher` field in
+   `package.json`).
+2. In *Profile → Access Tokens*, create a token scoped to that namespace.
+3. Add it to the GitHub repo as a secret named `OVSX_PAT`
+   (Settings → Secrets and variables → Actions).
+4. Tag a release (`git tag vX.Y.Z && git push origin vX.Y.Z`). The
+   `ovsx-publish` workflow builds the `.vsix` and publishes it; if the secret
+   is missing the job is skipped.

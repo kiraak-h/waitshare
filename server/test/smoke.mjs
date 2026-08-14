@@ -279,6 +279,34 @@ try {
     record("tier3: suspended dev cannot serve", suspendedNext.body.ad === null && String(suspendedNext.body.reason ?? "").includes("account"), `${JSON.stringify(suspendedNext.body)}`)
     const overview = await api(base, "/admin/overview", { headers: { authorization: "Bearer smoke-admin-token" } })
     record("tier3: admin overview", overview.status === 200 && overview.body.impressions > 0, `${overview.status} impressions=${overview.body.impressions}`)
+
+    const paged = await api(base, "/admin/review?limit=1", { headers: { authorization: "Bearer smoke-admin-token" } })
+    record(
+      "tier3: admin pagination (limit=1 + total)",
+      paged.status === 200 && paged.body.devs.length === 1 && paged.body.total >= 1,
+      `${paged.status} devs=${paged.body.devs?.length} total=${paged.body.total}`
+    )
+    const labelOfFirst = Object.keys(review.body.devs[0]?.fraudLabels ?? {})[0]
+    if (labelOfFirst) {
+      const filtered = await api(base, `/admin/review?label=${encodeURIComponent(labelOfFirst)}`, {
+        headers: { authorization: "Bearer smoke-admin-token" },
+      })
+      record(
+        "tier3: admin label filter returns only matching devs",
+        filtered.status === 200 &&
+          filtered.body.devs.length > 0 &&
+          filtered.body.devs.every((d) => (d.fraudLabels?.[labelOfFirst] ?? 0) > 0),
+        `${filtered.status} label=${labelOfFirst} devs=${filtered.body.devs?.length}`
+      )
+    } else {
+      record("tier3: admin label filter returns only matching devs", false, "no fraud labels present")
+    }
+    const timeline = await api(base, `/admin/review/${botDev}`, { headers: { authorization: "Bearer smoke-admin-token" } })
+    record(
+      "tier3: admin dev timeline",
+      timeline.status === 200 && timeline.body.dev?.id === botDev && Array.isArray(timeline.body.events),
+      `${timeline.status} events=${timeline.body.events?.length}`
+    )
   }
 
   const total = results.length

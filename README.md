@@ -208,10 +208,17 @@ per-dev fraud review labels (bucket counts per signal in `fraud_labels`), an ops
 (metrics endpoint, request logging, per-IP rate limiting, backup/restore scripts), a Docker
 deployment (single container serving the built dashboard + API, with a Postgres service),
 CI validation of the Docker build and VS Code extension packaging, an auto-earn loop in the
-VS Code client, and automated Open VSX publishing on version tags.
+VS Code client, and automated Open VSX publishing on version tags. Since v0.4: automated
+releases (`release.yml` builds the zip, opens a release-branch PR, and publishes a GitHub
+Release on `v*` tags), a persisted admin-action log (`admin_actions`) feeding the risk
+trainer, an export script (`npm run export:labels -w server`) that turns review-queue
+decisions into labeled feature CSVs, admin smoke coverage for filter/pagination/timeline,
+and auto-earn parity across the opencode plugin and the Claude Code CLI.
 
 Remaining (all behind existing interfaces, no contract changes):
 - Replace the synthetic logistic weights in `server/assets/risk-model.json` with a model trained
   on labeled review-queue data. The trainer (`npm run train:risk -w server`) accepts real labels
   via `--data labeled.csv` (7 feature columns + `label`) and falls back to synthetic samples.
-  Real labels arrive once the review queue has production traffic (live Stripe spend).
+  Labels can be exported from the review queue with `npm run export:labels -w server`
+  (`--out labels.csv --per-dev 300 --max-rows 20000`; Postgres via `DATABASE_URL`, SQLite via
+  `DATA_DIR`). Real labels arrive once the review queue has production traffic (live Stripe spend).

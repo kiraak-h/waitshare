@@ -116,6 +116,13 @@ CREATE TABLE IF NOT EXISTS fraud_events (
   created_at   BIGINT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS admin_actions (
+  id         BIGSERIAL PRIMARY KEY,
+  dev_id     TEXT NOT NULL,
+  action     TEXT NOT NULL,
+  created_at BIGINT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS payouts (
   id                 TEXT PRIMARY KEY,
   dev_id             TEXT NOT NULL,
@@ -176,6 +183,7 @@ CREATE INDEX IF NOT EXISTS idx_impressions_network    ON impressions (network_ha
 CREATE INDEX IF NOT EXISTS idx_impressions_ip         ON impressions (ip_hash);
 CREATE INDEX IF NOT EXISTS idx_fraud_dev              ON fraud_events (dev_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_fraud_network          ON fraud_events (network_hash, created_at);
+CREATE INDEX IF NOT EXISTS idx_admin_actions_dev      ON admin_actions (dev_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_payouts_dev_status     ON payouts (dev_id, status);
 CREATE INDEX IF NOT EXISTS idx_campaigns_surface      ON campaigns (surface, status);
 CREATE INDEX IF NOT EXISTS idx_sessions_dev           ON sessions (dev_id);
