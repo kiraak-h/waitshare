@@ -32,6 +32,9 @@ const maxRows = maxRowsIdx >= 0 ? Number(args[maxRowsIdx + 1]) : 20000
 const FEATURES = ["regularity", "durationUniformity", "viewabilityUniformity", "rate", "networkScore", "flagScore", "youth"]
 const WINDOW_MS = 24 * 60 * 60 * 1000
 const HOUR_MS = 60 * 60 * 1000
+// Mirror config.ts so exported features match what the live model sees.
+const HOURLY_CAP = Number(process.env.CAP_HOURLY ?? 60)
+const VPN_NETWORKS = Number(process.env.TIER2_VPN_NETWORKS ?? 3)
 
 function clamp01(x) {
   return Math.max(0, Math.min(1, x))
@@ -66,8 +69,8 @@ function featuresFor(history, hourly, networks, fraudFlags, ageHours) {
     gapCv === null ? 0.5 : clamp01(1 - gapCv / 0.5),
     durationCv === null ? 0.5 : clamp01(1 - durationCv / 0.4),
     viewabilityCv === null ? 0.5 : clamp01(1 - viewabilityCv / 0.3),
-    clamp01(hourly / 60),
-    clamp01(networks / 3),
+    clamp01(hourly / HOURLY_CAP),
+    clamp01(networks / VPN_NETWORKS),
     clamp01(fraudFlags / 5),
     clamp01(1 - ageHours / 24),
   ]

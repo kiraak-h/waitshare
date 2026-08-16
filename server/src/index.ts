@@ -21,7 +21,7 @@ import { rateLimit } from "./services/rate-limit.js"
 import { randomUUID } from "node:crypto"
 
 const app = express()
-app.set("trust proxy", 1)
+app.set("trust proxy", config.trustProxy ? 1 : false)
 app.use(cors())
 
 app.use((req, res, next) => {
@@ -61,6 +61,12 @@ app.use("/api/v1/updates", updatesRouter)
 app.use("/api/v1/split", splitRouter)
 app.use("/api/v1/admin", adminRouter)
 app.use("/api/v1/metrics", metricsRouter)
+
+// JSON error handler — never leak HTML stack traces to API clients.
+app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error(`[waitshare] error ${req.method} ${req.originalUrl}:`, err)
+  res.status(500).json({ error: "internal error" })
+})
 
 const webDistIndex = path.join(config.webDistDir, "index.html")
 if (fs.existsSync(webDistIndex)) {

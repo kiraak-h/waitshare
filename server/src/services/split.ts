@@ -27,11 +27,6 @@ export async function devShareMills(grossMills: number): Promise<number> {
   return Math.floor((grossMills * devShare) / 100)
 }
 
-export async function platformShareMills(grossMills: number): Promise<number> {
-  const { platformShare } = await getSplitContract()
-  return Math.floor((grossMills * platformShare) / 100)
-}
-
 export function cpmToPerImpressionMills(cpmCents: number): number {
   return Math.floor((cpmCents * 1000) / 1000)
 }

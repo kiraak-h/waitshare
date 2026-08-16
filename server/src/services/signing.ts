@@ -56,10 +56,8 @@ export function signWithDeviceKey(payload: Record<string, unknown>, privateKeyB6
   return crypto.sign(null, Buffer.from(JSON.stringify(payload)), key).toString("base64")
 }
 
-export function publicKeyFingerprint(pubkeyB64: string): string {
-  return crypto.createHash("sha256").update(pubkeyB64).digest("hex").slice(0, 16)
-}
-
-export function sha256hex(input: string): string {
-  return crypto.createHash("sha256").update(input).digest("hex")
+export function timingSafeEqualStr(a: string, b: string): boolean {
+  const ha = crypto.createHash("sha256").update(a).digest()
+  const hb = crypto.createHash("sha256").update(b).digest()
+  return crypto.timingSafeEqual(ha, hb)
 }

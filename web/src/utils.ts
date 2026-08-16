@@ -16,6 +16,7 @@ export function formatDate(ts: number): string {
 
 export function timeAgo(ts: number): string {
   const s = Math.floor((Date.now() - ts) / 1000)
+  if (s < 0) return "now"
   if (s < 60) return `${s}s ago`
   const m = Math.floor(s / 60)
   if (m < 60) return `${m}m ago`

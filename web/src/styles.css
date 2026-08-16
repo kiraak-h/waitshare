@@ -368,6 +368,26 @@ body {
   color: var(--text-dim);
   font-size: 14px;
 }
+.step-body {
+  margin-top: 8px;
+  font-size: 14px;
+  color: var(--text-dim);
+}
+.step-body p {
+  margin: 0 0 10px;
+}
+.step-body h3 {
+  margin: 14px 0 6px;
+  color: var(--text);
+  font-size: 15px;
+}
+.step-body ul {
+  margin: 8px 0;
+  padding-left: 18px;
+}
+.step-body li {
+  margin-bottom: 6px;
+}
 
 /* Market grid */
 .market-grid {

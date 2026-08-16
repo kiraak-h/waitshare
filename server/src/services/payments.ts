@@ -50,15 +50,19 @@ class StubPaymentProvider implements PaymentProvider {
   readonly mode = "stub"
 
   async createCheckoutSession(opts: CheckoutOpts): Promise<CheckoutResult> {
+    // Stub mode simulates Stripe Checkout by landing directly on the success
+    // URL; the web UI then confirms/activates the campaign in-page.
     return {
-      url: `${config.webBaseUrl}/checkout/simulated?amount=${opts.amountCents}&reference=${opts.metadata.campaignId ?? ""}`,
+      url: opts.successUrl,
       reference: `stub_checkout_${Date.now()}`,
     }
   }
 
   async createConnectAccountLink(opts: ConnectLinkOpts): Promise<ConnectLinkResult> {
+    // Stub mode simulates Stripe Express onboarding by returning the return
+    // URL; there is no external onboarding page to complete.
     return {
-      url: `${config.webBaseUrl}/onboarding/simulated?dev=${opts.devId}`,
+      url: opts.returnUrl,
       accountId: `stub_acct_${opts.devId}`,
     }
   }

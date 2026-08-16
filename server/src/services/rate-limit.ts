@@ -1,4 +1,5 @@
 import type { RequestHandler } from "express"
+import { getClientIp } from "./network.js"
 
 export interface RateLimitOpts {
   windowMs: number
@@ -14,7 +15,7 @@ const windows = new Map<string, Window>()
 
 export function rateLimit(opts: RateLimitOpts): RequestHandler {
   return (req, res, next) => {
-    const ip = req.ip ?? "unknown"
+    const ip = getClientIp(req) ?? "unknown"
     const now = Date.now()
     let w = windows.get(ip)
     if (!w || w.resetAt <= now) {
@@ -28,8 +29,4 @@ export function rateLimit(opts: RateLimitOpts): RequestHandler {
     }
     next()
   }
-}
-
-export function resetRateLimits(): void {
-  windows.clear()
 }

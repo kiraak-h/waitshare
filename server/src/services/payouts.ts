@@ -17,7 +17,7 @@ export interface PayoutRow {
 export async function processHeldPayouts(): Promise<{ processed: number; failed: number }> {
   const now = Date.now()
   const due = await db.all<PayoutRow>(
-    "SELECT * FROM payouts WHERE status = 'held' AND available_at IS NOT NULL AND available_at <= ?",
+    "SELECT * FROM payouts WHERE status = 'held' AND stripe_transfer_id IS NULL AND available_at IS NOT NULL AND available_at <= ?",
     [now]
   )
 
@@ -38,7 +38,7 @@ export async function processHeldPayouts(): Promise<{ processed: number; failed:
         const transfer = await payments.createTransfer({
           devId: p.dev_id,
           accountId: dev.stripe_account_id,
-          amountCents: Math.floor(p.amount_mills / 100),
+          amountCents: Math.floor(p.amount_mills / 1000),
           metadata: { payoutId: p.id },
         })
         await db.run("UPDATE payouts SET status = 'pending', stripe_transfer_id = ? WHERE id = ?", [
@@ -46,7 +46,8 @@ export async function processHeldPayouts(): Promise<{ processed: number; failed:
           p.id,
         ])
         processed++
-      } catch {
+      } catch (e) {
+        console.error(`[waitshare] transfer failed for payout ${p.id}:`, (e as Error).message)
         failed++
       }
     } else {
@@ -69,25 +70,26 @@ export async function releaseReserves(): Promise<{ releasedMills: number; devs: 
 
   if (rows.length === 0) return { releasedMills: 0, devs: 0 }
 
-  const byDev = new Map<string, number>()
-  for (const r of rows) {
-    byDev.set(r.dev_id, (byDev.get(r.dev_id) ?? 0) + r.reserved_mills)
-  }
-
   const now = Date.now()
-  for (const r of rows) {
-    await db.run("UPDATE impressions SET reserve_released_at = ? WHERE id = ?", [now, r.id])
-  }
+  const byDev = new Map<string, number>()
+  await db.withTransaction(async (tx) => {
+    for (const r of rows) {
+      const claimed = await tx.run("UPDATE impressions SET reserve_released_at = ? WHERE id = ? AND reserve_released_at IS NULL", [now, r.id])
+      if (claimed.changes === 1) {
+        byDev.set(r.dev_id, (byDev.get(r.dev_id) ?? 0) + r.reserved_mills)
+      }
+    }
+    for (const [devId, mills] of byDev) {
+      await tx.run("UPDATE devs SET reserve_mills = reserve_mills - ?, balance_mills = balance_mills + ? WHERE id = ?", [
+        mills,
+        mills,
+        devId,
+      ])
+    }
+  })
 
   let releasedMills = 0
-  for (const [devId, mills] of byDev) {
-    await db.run("UPDATE devs SET reserve_mills = reserve_mills - ?, balance_mills = balance_mills + ? WHERE id = ?", [
-      mills,
-      mills,
-      devId,
-    ])
-    releasedMills += mills
-  }
+  for (const mills of byDev.values()) releasedMills += mills
 
   return { releasedMills, devs: byDev.size }
 }

@@ -31,9 +31,13 @@ function useAuction() {
 function useSplit() {
   const [split, setSplit] = useState<SplitDto | null>(null)
   useEffect(() => {
+    let alive = true
     api<{ split: SplitDto }>("/split")
-      .then((r) => setSplit(r.split))
+      .then((r) => alive && setSplit(r.split))
       .catch(() => undefined)
+    return () => {
+      alive = false
+    }
   }, [])
   return split
 }
@@ -69,9 +73,9 @@ export default function Home() {
             <span className="spinner-title">Analyzing project structure…</span>
           </div>
           <div className="spinner-body">
-            <span className="spinner-ad">Sponsored · ExampleCorp — deploy agents to the cloud</span>
+            <span className="spinner-ad">Sponsored · Your campaign could appear here</span>
             <span className="spinner-ad" style={{ opacity: 0.55 }}>
-              Sponsored · DevToolX — observability for AI agents
+              Sponsored · Reserved for the live auction winner
             </span>
           </div>
           <div className="spinner-foot">

@@ -2,7 +2,7 @@ import { Router } from "express"
 import fs from "node:fs"
 import path from "node:path"
 import { db } from "../db.js"
-import { signJson, getServerPublicKeyB64 } from "../services/signing.js"
+import { signJson, getServerPublicKeyB64, timingSafeEqualStr } from "../services/signing.js"
 import { config, ensureDataDir } from "../config.js"
 import { asyncHandler } from "../async-handler.js"
 
@@ -15,6 +15,18 @@ const SIGNED_FIELDS = ["platform", "version", "url", "sha256"] as const
 
 function signedPayload(m: { platform: string; version: string; url: string; sha256: string }) {
   return { platform: m.platform, version: m.version, url: m.url, sha256: m.sha256 }
+}
+
+/** Numeric semver comparison; "1.2.3-beta" is treated as 1.2.3. Returns -1/0/1. */
+function compareVersions(a: string, b: string): number {
+  const pa = a.split(".").map((n) => parseInt(n, 10) || 0)
+  const pb = b.split(".").map((n) => parseInt(n, 10) || 0)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const na = pa[i] ?? 0
+    const nb = pb[i] ?? 0
+    if (na !== nb) return na < nb ? -1 : 1
+  }
+  return 0
 }
 
 updatesRouter.get("/key", (_req, res) => {
@@ -45,7 +57,7 @@ updatesRouter.get(
     }
 
     const body = { ...signedPayload(manifest), createdAt: manifest.created_at }
-    if (version === manifest.version) {
+    if (compareVersions(version, manifest.version) >= 0) {
       res.json({ latest: body, upToDate: true })
       return
     }
@@ -56,7 +68,7 @@ updatesRouter.get(
       verification: {
         algorithm: "Ed25519",
         signedFields: SIGNED_FIELDS,
-        publicKey: null,
+        publicKey: getServerPublicKeyB64(),
         note: "Clients verify the manifest signature over exactly {platform, version, url, sha256} against the WaitShare public key.",
       },
     })
@@ -65,7 +77,7 @@ updatesRouter.get(
 
 function requireAdmin(req: { headers: { authorization?: string } }): boolean {
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, "")
-  return Boolean(config.adminToken && token === config.adminToken)
+  return Boolean(config.adminToken && timingSafeEqualStr(token ?? "", config.adminToken))
 }
 
 updatesRouter.post(

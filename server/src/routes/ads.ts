@@ -20,7 +20,10 @@ const SUPPORTED_SURFACES = ["opencode", "claude-code-cli", "vscode", "terminal"]
 async function getSessionDevId(req: Request): Promise<string | null> {
   const token = req.headers["authorization"]?.replace(/^Bearer\s+/i, "")
   if (!token) return null
-  const session = await db.get<{ dev_id: string }>("SELECT * FROM sessions WHERE token = ?", [token])
+  const session = await db.get<{ dev_id: string }>("SELECT * FROM sessions WHERE token = ? AND expires_at > ?", [
+    token,
+    Date.now(),
+  ])
   return session?.dev_id ?? null
 }
 
@@ -98,7 +101,7 @@ adsRouter.get(
 const impressionSchema = z.object({
   serveId: z.string().min(1),
   deviceId: z.string().min(1),
-  durationMs: z.number().int().positive(),
+  durationMs: z.number().int().positive().max(30 * 60 * 1000),
   viewablePct: z.number().int().min(0).max(100),
   focusPct: z.number().int().min(0).max(100).default(100),
   nonce: z.string().min(1),
@@ -116,6 +119,11 @@ adsRouter.post(
     }
     const { serveId, deviceId, durationMs, viewablePct, focusPct, nonce, ts, signature } = parsed.data
     const now = Date.now()
+
+    if (Math.abs(now - ts) > 10 * 60 * 1000) {
+      res.status(400).json({ error: "impression timestamp out of range" })
+      return
+    }
 
     const serve = await getServe(serveId)
     if (!serve) {
@@ -157,7 +165,9 @@ adsRouter.post(
         return
       }
     } else {
-      if (signature !== "demo") {
+      // Unregistered devices may only submit the "demo" signature in stub mode.
+      // In live mode every impression must be signed by a registered device key.
+      if (config.stripeMode !== "stub" || signature !== "demo") {
         res.status(401).json({ error: "unregistered device or invalid signature" })
         return
       }
@@ -217,6 +227,10 @@ adsRouter.post(
       ipHash: signals.ipHash,
       signature,
     })
+    if (!result) {
+      res.status(409).json({ error: "serve already used" })
+      return
+    }
     inc("impressionsCredited")
 
     const split = await getSplitContract()

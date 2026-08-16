@@ -21,7 +21,6 @@ const campaignSchema = z.object({
   blocks: z.number().int().min(1).max(10000),
   countryFilter: z.array(z.string().max(3)).max(50).optional(),
   deliverySpeed: z.enum(["slow", "medium", "fast"]).default("fast"),
-  leaderboard: z.boolean().default(true),
 })
 
 advertiserRouter.post(
@@ -82,21 +81,32 @@ advertiserRouter.post(
   })
 )
 
-advertiserRouter.post(
-  "/campaigns/:id/confirm",
-  asyncHandler(async (req, res) => {
-    const id = String(req.params.id)
-    const campaign = await db.get<{ status: string; advertiser_id: string }>("SELECT * FROM campaigns WHERE id = ?", [id])
-    if (!campaign) {
-      res.status(404).json({ error: "campaign not found" })
-      return
-    }
-    if (campaign.status === "pending_payment") {
-      await db.run("UPDATE campaigns SET status = 'active', updated_at = ? WHERE id = ?", [Date.now(), id])
-    }
-    res.json({ ok: true, status: "active" })
-  })
-)
+// In live mode the Stripe webhook (checkout.session.completed) is the only way
+// a campaign becomes active; the stub endpoint below simulates that transition.
+if (config.stripeMode === "stub") {
+  advertiserRouter.post(
+    "/campaigns/:id/confirm",
+    asyncHandler(async (req, res) => {
+      const id = String(req.params.id)
+      const campaign = await db.get<{ status: string; advertiser_id: string }>("SELECT * FROM campaigns WHERE id = ?", [id])
+      if (!campaign) {
+        res.status(404).json({ error: "campaign not found" })
+        return
+      }
+      if (campaign.status === "pending_payment") {
+        await db.run("UPDATE campaigns SET status = 'active', updated_at = ? WHERE id = ?", [Date.now(), id])
+      }
+      res.json({ ok: true, status: "active" })
+    })
+  )
+} else {
+  advertiserRouter.post(
+    "/campaigns/:id/confirm",
+    asyncHandler(async (_req, res) => {
+      res.status(403).json({ error: "campaign activation happens via the payment webhook in live mode" })
+    })
+  )
+}
 
 advertiserRouter.get(
   "/campaigns",

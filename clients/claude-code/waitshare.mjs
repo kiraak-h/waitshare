@@ -70,10 +70,12 @@ async function report() {
   const config = readConfig()
   if (!fs.existsSync(CURRENT_PATH)) return
   const current = JSON.parse(fs.readFileSync(CURRENT_PATH, "utf8"))
-  fs.rmSync(CURRENT_PATH, { force: true })
 
   const durationMs = Date.now() - current.startedAt
-  if (durationMs < MIN_DURATION_MS) return
+  if (durationMs < MIN_DURATION_MS) {
+    fs.rmSync(CURRENT_PATH, { force: true })
+    return
+  }
 
   try {
     const payload = {
@@ -98,7 +100,17 @@ async function report() {
       console.error(`[waitshare] rejected: ${body?.error ?? res.status} ${body?.reason ?? ""}`)
     }
   } catch (e) {
+    // Keep current.json so a later report can retry; the server dedupes by serveId.
     console.error("[waitshare] report failed:", e.message)
+    return
+  }
+
+  // Only clear the file if it still describes the serve we just reported.
+  try {
+    const live = JSON.parse(fs.readFileSync(CURRENT_PATH, "utf8"))
+    if (live.serveId === current.serveId) fs.rmSync(CURRENT_PATH, { force: true })
+  } catch {
+    /* already gone */
   }
 }
 

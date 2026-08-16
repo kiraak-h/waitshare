@@ -40,6 +40,16 @@ export class HeuristicModel implements RiskModel {
   }
 }
 
+const FEATURE_KEYS = new Set<keyof RiskFeatures>([
+  "regularity",
+  "durationUniformity",
+  "viewabilityUniformity",
+  "rate",
+  "networkScore",
+  "flagScore",
+  "youth",
+])
+
 export interface TrainedModelJson {
   name: string
   features: (keyof RiskFeatures)[]
@@ -83,6 +93,7 @@ export function getRiskModel(): RiskModel {
         Array.isArray(parsed.features) &&
         Array.isArray(parsed.weights) &&
         parsed.features.length === parsed.weights.length &&
+        parsed.features.every((f) => FEATURE_KEYS.has(f)) &&
         typeof parsed.intercept === "number"
       ) {
         cache = new LogisticModel(parsed)

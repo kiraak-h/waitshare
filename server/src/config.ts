@@ -45,6 +45,10 @@ export const config = {
   webDistDir: process.env.WEB_DIST_DIR ?? path.resolve(import.meta.dirname, "../../web/dist"),
   publicBaseUrl: process.env.PUBLIC_BASE_URL ?? "http://localhost:3001",
   webBaseUrl: process.env.WEB_BASE_URL ?? "http://localhost:5173",
+  // When behind a trusted reverse proxy, honor X-Forwarded-For for rate
+  // limiting and network hashing. Set TRUST_PROXY=0 when the API is directly
+  // exposed so clients cannot spoof the header to rotate their limits.
+  trustProxy: process.env.TRUST_PROXY !== "0",
   stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? "",
   stripeMode: process.env.STRIPE_MODE ?? "stub",
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",

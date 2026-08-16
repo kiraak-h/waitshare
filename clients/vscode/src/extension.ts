@@ -71,10 +71,12 @@ async function reportImpression(config: Config, focusMs: number, windowFocusedNo
     startedAt: number
     nonce: string
   }
-  fs.rmSync(currentPath(), { force: true })
 
   const durationMs = Date.now() - current.startedAt
-  if (durationMs < MIN_DURATION_MS) return "too short"
+  if (durationMs < MIN_DURATION_MS) {
+    fs.rmSync(currentPath(), { force: true })
+    return "too short"
+  }
 
   let accumulated = focusMs
   if (windowFocusedNow) accumulated += Date.now() - lastFocusChange
@@ -90,13 +92,25 @@ async function reportImpression(config: Config, focusMs: number, windowFocusedNo
     ts: Date.now(),
   }
   const signature = signPayload(payload, config.privateKeyB64)
-  const res = await fetch(`${config.api}/ads/impressions`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ ...payload, signature }),
-  })
-  const body = (await res.json()) as { credited?: boolean; devShareMills?: number; error?: string; reason?: string }
-  return body.credited ? `credited ${body.devShareMills} mills` : body.error ?? String(res.status)
+  try {
+    const res = await fetch(`${config.api}/ads/impressions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...payload, signature }),
+    })
+    const body = (await res.json()) as { credited?: boolean; devShareMills?: number; error?: string; reason?: string }
+    // Only clear the file if it still describes the serve we just reported.
+    try {
+      const live = JSON.parse(fs.readFileSync(currentPath(), "utf8")) as { serveId: string }
+      if (live.serveId === current.serveId) fs.rmSync(currentPath(), { force: true })
+    } catch {
+      /* already gone */
+    }
+    return body.credited ? `credited ${body.devShareMills} mills` : body.error ?? String(res.status)
+  } catch (e) {
+    // Keep current.json so a later report can retry; the server dedupes by serveId.
+    return `report failed: ${String(e)}`
+  }
 }
 
 export function activate(context: vscode.ExtensionContext) {
@@ -123,7 +137,11 @@ export function activate(context: vscode.ExtensionContext) {
       return
     }
     try {
-      const current = JSON.parse(fs.readFileSync(currentPath(), "utf8")) as { adLine: string }
+      const current = JSON.parse(fs.readFileSync(currentPath(), "utf8")) as { adLine: string; startedAt: number }
+      if (Date.now() - current.startedAt > MAX_AUTO_MS) {
+        bar.hide()
+        return
+      }
       bar.text = `$(megaphone) Sponsored · ${current.adLine}`
       bar.tooltip = "WaitShare — you keep 60% of this impression"
       bar.show()

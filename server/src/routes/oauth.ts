@@ -92,6 +92,10 @@ oauthRouter.get("/google/callback", async (req, res) => {
       res.status(502).json({ error: "google userinfo incomplete" })
       return
     }
+    if (info.email_verified !== true) {
+      res.status(403).json({ error: "google email not verified" })
+      return
+    }
 
     const existing = await db.get<{ id: string }>("SELECT id FROM devs WHERE google_sub = ? OR email = ?", [
       info.sub,

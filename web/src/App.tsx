@@ -41,8 +41,7 @@ function Nav() {
   )
 }
 
-export default function App() {
-  return (
+export default function App() {  return (
     <div className="app">
       <Nav />
       <main className="main">
@@ -53,12 +52,27 @@ export default function App() {
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/install" element={<Install />} />
           <Route path="/admin" element={<Admin />} />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </main>
       <footer className="footer">
         <span>WaitShare — get paid for waiting. 60% to developers, locked in code.</span>
         <span>Auditable ledger. Signed updates. No prompts, ever.</span>
       </footer>
+    </div>
+  )
+}
+
+function NotFound() {
+  return (
+    <div className="page narrow">
+      <section className="hero-mini">
+        <h1>404</h1>
+        <p>Page not found.</p>
+        <a className="btn btn-primary" href="/">
+          Back home
+        </a>
+      </section>
     </div>
   )
 }

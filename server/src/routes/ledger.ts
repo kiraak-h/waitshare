@@ -10,6 +10,10 @@ ledgerRouter.get(
   "/",
   asyncHandler(async (req, res) => {
     const since = Number(req.query.since ?? 0)
+    if (!Number.isFinite(since) || since < 0) {
+      res.status(400).json({ error: "since must be a non-negative timestamp" })
+      return
+    }
     const [{ rows, contract }] = await Promise.all([contractRows(since)])
     const shareOf = (mills: number): number => Math.floor((mills * contract.devShare) / 100)
 

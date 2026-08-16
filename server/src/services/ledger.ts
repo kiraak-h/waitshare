@@ -20,55 +20,64 @@ export interface RecordImpressionInput {
 
 export async function recordImpression(
   input: RecordImpressionInput
-): Promise<{ id: string; devShareMills: number; grossMills: number }> {
-  const campaign = await db.get<{ cpm_cents: number }>("SELECT * FROM campaigns WHERE id = ?", [input.campaignId])
-
-  const grossMills = campaign ? cpmToPerImpressionMills(campaign.cpm_cents) : 0
-  const share = campaign ? await devShareMills(grossMills) : 0
-  const reserved = Math.floor((share * config.reservePct) / 100)
-  const released = share - reserved
-
+): Promise<{ id: string; devShareMills: number; grossMills: number } | null> {
   const id = randomUUID()
   const now = Date.now()
 
-  await db.run(
-    "INSERT INTO impressions (id, serve_id, campaign_id, dev_id, device_id, surface, duration_ms, viewable_pct, focus_pct, nonce, network_hash, ip_hash, served_at, gross_mills, dev_share_mills, reserved_mills, signature, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'credited')",
-    [
-      id,
-      input.serveId,
-      input.campaignId,
-      input.devId,
-      input.deviceId,
-      input.surface,
-      input.durationMs,
-      input.viewablePct,
-      input.focusPct,
-      input.nonce,
-      input.networkHash,
-      input.ipHash,
-      now,
-      grossMills,
-      share,
-      reserved,
-      input.signature,
-    ]
-  )
-
-  await db.run("UPDATE campaigns SET impressions_served = impressions_served + 1, updated_at = ? WHERE id = ?", [
-    now,
-    input.campaignId,
-  ])
-
-  await db.run("UPDATE serves SET status = 'completed', completed_at = ? WHERE id = ?", [now, input.serveId])
-
-  if (input.devId) {
-    await db.run(
-      "UPDATE devs SET balance_mills = balance_mills + ?, reserve_mills = reserve_mills + ?, total_earned_mills = total_earned_mills + ? WHERE id = ?",
-      [released, reserved, share, input.devId]
+  return db.withTransaction(async (tx) => {
+    // Atomically claim the serve. Concurrent reports for the same serve see
+    // changes === 0 on the second request and are rejected instead of
+    // double-crediting the dev.
+    const claimed = await tx.run(
+      "UPDATE serves SET status = 'completed', completed_at = ? WHERE id = ? AND status = 'pending'",
+      [now, input.serveId]
     )
-  }
+    if (claimed.changes !== 1) return null
 
-  return { id, devShareMills: share, grossMills }
+    const campaign = await tx.get<{ cpm_cents: number }>("SELECT * FROM campaigns WHERE id = ?", [input.campaignId])
+
+    const grossMills = campaign ? cpmToPerImpressionMills(campaign.cpm_cents) : 0
+    const share = campaign ? await devShareMills(grossMills) : 0
+    const reserved = Math.floor((share * config.reservePct) / 100)
+    const released = share - reserved
+
+    await tx.run(
+      "INSERT INTO impressions (id, serve_id, campaign_id, dev_id, device_id, surface, duration_ms, viewable_pct, focus_pct, nonce, network_hash, ip_hash, served_at, gross_mills, dev_share_mills, reserved_mills, signature, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'credited')",
+      [
+        id,
+        input.serveId,
+        input.campaignId,
+        input.devId,
+        input.deviceId,
+        input.surface,
+        input.durationMs,
+        input.viewablePct,
+        input.focusPct,
+        input.nonce,
+        input.networkHash,
+        input.ipHash,
+        now,
+        grossMills,
+        share,
+        reserved,
+        input.signature,
+      ]
+    )
+
+    await tx.run("UPDATE campaigns SET impressions_served = impressions_served + 1, updated_at = ? WHERE id = ?", [
+      now,
+      input.campaignId,
+    ])
+
+    if (input.devId) {
+      await tx.run(
+        "UPDATE devs SET balance_mills = balance_mills + ?, reserve_mills = reserve_mills + ?, total_earned_mills = total_earned_mills + ? WHERE id = ?",
+        [released, reserved, share, input.devId]
+      )
+    }
+
+    return { id, devShareMills: share, grossMills }
+  })
 }
 
 export async function voidServe(serveId: string): Promise<void> {

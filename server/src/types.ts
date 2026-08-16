@@ -59,7 +59,3 @@ export interface LedgerEntryDto {
   grossMills: number
   devShareMills: number
 }
-
-export function centsToDisplay(cents: number): string {
-  return (cents / 100).toFixed(2)
-}

@@ -78,17 +78,22 @@ export async function applyStripeEvent(event: Stripe.Event): Promise<void> {
     }
     case "transfer.created": {
       const transfer = event.data.object as Stripe.Transfer
-      const payout = await db.get<{ dev_id: string; amount_mills: number }>(
-        "SELECT dev_id, amount_mills FROM payouts WHERE stripe_transfer_id = ?",
-        [transfer.id]
+      const result = await db.run(
+        "UPDATE payouts SET status = 'cleared', cleared_at = ? WHERE stripe_transfer_id = ? AND status <> 'cleared'",
+        [Date.now(), transfer.id]
       )
-      await db.run("UPDATE payouts SET status = 'cleared', cleared_at = ? WHERE stripe_transfer_id = ?", [
-        Date.now(),
-        transfer.id,
-      ])
-      if (payout) {
-        await db.run("UPDATE devs SET paid_mills = paid_mills + ? WHERE id = ?", [payout.amount_mills, payout.dev_id])
-        inc("payoutsCleared")
+      // Only credit paid_mills once per payout. Stripe redelivers webhooks,
+      // and the conditional status update above makes this idempotent
+      // regardless of whether the payout is still 'held' or already 'pending'.
+      if (result.changes === 1) {
+        const payout = await db.get<{ dev_id: string; amount_mills: number }>(
+          "SELECT dev_id, amount_mills FROM payouts WHERE stripe_transfer_id = ?",
+          [transfer.id]
+        )
+        if (payout) {
+          await db.run("UPDATE devs SET paid_mills = paid_mills + ? WHERE id = ?", [payout.amount_mills, payout.dev_id])
+          inc("payoutsCleared")
+        }
       }
       break
     }

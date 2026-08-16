@@ -60,9 +60,34 @@ export async function pickNextAd(
   devId: string | null,
   networkHash?: string
 ): Promise<NextAd | null> {
-  const candidates = (await listActiveCampaigns(surface)).filter((c) => c.impressions_served < c.impressions_bought)
+  let candidates = (await listActiveCampaigns(surface)).filter((c) => c.impressions_served < c.impressions_bought)
   if (candidates.length === 0) return null
   if ((await pendingServeCount(deviceId)) >= config.maxPendingServes) return null
+
+  const devCountry = devId
+    ? ((await db.get<{ country: string | null }>("SELECT country FROM devs WHERE id = ?", [devId]))?.country ?? null)
+    : null
+  if (devCountry) {
+    candidates = candidates.filter((c) => {
+      if (!c.country_filter) return true
+      try {
+        const allowed = JSON.parse(c.country_filter)
+        return Array.isArray(allowed) && allowed.includes(devCountry)
+      } catch {
+        return true
+      }
+    })
+  }
+  if (candidates.length === 0) return null
+
+  const deliveryPriority: Record<string, number> = { fast: 0, medium: 1, slow: 2 }
+  candidates.sort((a, b) => {
+    const pa = deliveryPriority[a.delivery_speed] ?? 0
+    const pb = deliveryPriority[b.delivery_speed] ?? 0
+    if (pa !== pb) return pa - pb
+    if (a.cpm_cents !== b.cpm_cents) return b.cpm_cents - a.cpm_cents
+    return a.created_at - b.created_at
+  })
 
   const last = await lastServeForDevice(deviceId, surface)
   const lastId = last?.campaign_id

@@ -2,13 +2,14 @@ import { Router, type Request } from "express"
 import { z } from "zod"
 import { db } from "../db.js"
 import { config } from "../config.js"
+import { timingSafeEqualStr } from "../services/signing.js"
 import { asyncHandler } from "../async-handler.js"
 
 export const adminRouter = Router()
 
 function requireAdmin(req: Request): boolean {
   const token = req.headers["authorization"]?.replace(/^Bearer\s+/i, "")
-  return Boolean(config.adminToken && token === config.adminToken)
+  return Boolean(config.adminToken && timingSafeEqualStr(token ?? "", config.adminToken))
 }
 
 interface DevRow {
@@ -40,7 +41,7 @@ function mapDev(d: DevRow) {
     fraudLabels: parseLabels(d.fraud_labels),
     trustTier: d.trust_tier,
     impressions: d.impressions,
-    earnedCents: Math.floor(d.earned_mills / 100),
+    earnedCents: Math.floor(d.earned_mills / 1000),
     createdAt: d.created_at,
   }
 }
@@ -67,7 +68,7 @@ adminRouter.get(
       DEV_SELECT +
         "WHERE d.fraud_flags > 0 OR EXISTS " +
         "(SELECT 1 FROM fraud_events f WHERE f.dev_id = d.id AND f.created_at > ?) " +
-        "ORDER BY d.fraud_flags DESC, d.created_at ASC LIMIT 1000",
+        "ORDER BY d.fraud_flags DESC, d.created_at ASC",
       [since]
     )
     const flagged = label ? flaggedRaw.filter((d) => (parseLabels(d.fraud_labels)[label] ?? 0) > 0) : flaggedRaw
@@ -106,13 +107,19 @@ adminRouter.get(
       res.status(404).json({ error: "dev not found" })
       return
     }
-    const events = await db.all<{ id: number; type: string; device_id: string | null; reason: string; created_at: number }>(
-      "SELECT id, type, device_id, reason, created_at FROM fraud_events WHERE dev_id = ? ORDER BY created_at DESC LIMIT 100",
+    const events = await db.all<{ id: number; type: string; dev_id: string | null; device_id: string | null; reason: string; created_at: number }>(
+      "SELECT id, type, dev_id, device_id, reason, created_at FROM fraud_events WHERE dev_id = ? ORDER BY created_at DESC LIMIT 100",
       [devId]
     )
     res.json({
       dev: mapDev(dev),
-      events: events.map((e) => ({ id: e.id, type: e.type, reason: e.reason, createdAt: e.created_at })),
+      events: events.map((e) => ({
+        id: e.id,
+        type: e.type,
+        devId: e.dev_id,
+        reason: e.reason,
+        createdAt: e.created_at,
+      })),
     })
   })
 )

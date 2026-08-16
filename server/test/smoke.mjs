@@ -56,7 +56,9 @@ if (!base) {
       DATA_DIR: dataDir,
       SEED_DEMO: "0",
       STRIPE_MODE: "stub",
-      PAYMENT_THRESHOLD_CENTS: "1",
+      // Threshold is in whole cents; the honest impression credits 180 mills
+      // (0.18c), so 0 keeps the payout lifecycle reachable.
+      PAYMENT_THRESHOLD_CENTS: "0",
       ADMIN_TOKEN: "smoke-admin-token",
     },
     stdio: "ignore",
@@ -142,7 +144,8 @@ try {
   record("smoke: honest impression credited", honest.status === 200 && honest.body.credited === true && honest.body.devShareMills === 180, `${honest.status} ${JSON.stringify(honest.body)}`)
 
   const me = await api(base, "/dev/me", { headers: { authorization: `Bearer ${token}` } })
-  record("smoke: dev balance reflects credit", me.status === 200 && me.body.dev.balanceCents >= 1, `${me.status} balanceCents=${me.body.dev?.balanceCents}`)
+  // 180 mills = 0.18 cents; the DTO floors to whole cents, so 0 is correct.
+  record("smoke: dev balance reflects credit", me.status === 200 && me.body.dev.balanceCents === 0, `${me.status} balanceCents=${me.body.dev?.balanceCents}`)
 
   const payout = await api(base, "/dev/payout", { method: "POST", headers: { authorization: `Bearer ${token}` } })
   record("smoke: payout enters held", payout.status === 200 && payout.body.status === "held" && payout.body.amountMills > 0, `${payout.status} ${JSON.stringify(payout.body)}`)

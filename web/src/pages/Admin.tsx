@@ -44,6 +44,7 @@ const PAGE = 50
 
 export default function Admin() {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem("ws_admin_token"))
+  const [draft, setDraft] = useState("")
   const [overview, setOverview] = useState<Overview | null>(null)
   const [review, setReview] = useState<Review | null>(null)
   const [filter, setFilter] = useState<string>("")
@@ -78,6 +79,10 @@ export default function Admin() {
     void load()
   }, [token, filter, offset])
 
+  useEffect(() => {
+    setOffset(0)
+  }, [filter])
+
   async function loadTimeline(devId: string) {
     if (!token) return
     setErr(null)
@@ -92,10 +97,12 @@ export default function Admin() {
 
   function save(e: FormEvent) {
     e.preventDefault()
-    localStorage.setItem("ws_admin_token", token ?? "")
-    setToken(token)
+    setErr(null)
+    if (!draft.trim()) return
+    localStorage.setItem("ws_admin_token", draft.trim())
+    setDraft("")
+    setToken(draft.trim())
     setMsg(null)
-    void load()
   }
 
   async function act(devId: string, action: string) {
@@ -132,8 +139,8 @@ export default function Admin() {
             <span>Admin token</span>
             <input
               type="password"
-              value={token ?? ""}
-              onChange={(e) => setToken(e.target.value)}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
               placeholder="paste ADMIN_TOKEN"
             />
           </label>
@@ -228,7 +235,14 @@ export default function Admin() {
                       dev={d}
                       expanded={expandedId === d.id}
                       timeline={expandedId === d.id ? timeline : null}
-                      onExpand={() => (expandedId === d.id ? setExpandedId(null) : void loadTimeline(d.id))}
+                      onExpand={() => {
+                        if (expandedId === d.id) {
+                          setExpandedId(null)
+                        } else {
+                          setTimeline(null)
+                          void loadTimeline(d.id)
+                        }
+                      }}
                       onAct={(a) => act(d.id, a)}
                     />
                   ))}

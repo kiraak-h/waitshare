@@ -8,6 +8,12 @@ export interface RunResult {
   changes: number
 }
 
+export interface Tx {
+  get<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T | undefined>
+  all<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]>
+  run(sql: string, params?: unknown[]): Promise<RunResult>
+}
+
 export interface DbDriver {
   readonly kind: "sqlite" | "postgres"
   init(): Promise<void>
@@ -16,6 +22,7 @@ export interface DbDriver {
   run(sql: string, params?: unknown[]): Promise<RunResult>
   exec(sql: string): Promise<void>
   close(): Promise<void>
+  withTransaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T>
 }
 
 const SQLITE_DDL = `
@@ -225,6 +232,31 @@ class SqliteDriver implements DbDriver {
     this.require().exec(sql)
   }
 
+  async withTransaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
+    const raw = this.require()
+    const tx: Tx = {
+      get: async <T2>(sql: string, params?: unknown[]) => raw.prepare(sql).get(...(params ?? [])) as T2 | undefined,
+      all: async <T2>(sql: string, params?: unknown[]) => raw.prepare(sql).all(...(params ?? [])) as T2[],
+      run: async (sql: string, params?: unknown[]) => {
+        const info = raw.prepare(sql).run(...(params ?? []))
+        return { changes: info.changes }
+      },
+    }
+    raw.prepare("BEGIN IMMEDIATE").run()
+    try {
+      const result = await fn(tx)
+      raw.prepare("COMMIT").run()
+      return result
+    } catch (e) {
+      try {
+        raw.prepare("ROLLBACK").run()
+      } catch {
+        /* ignore */
+      }
+      throw e
+    }
+  }
+
   async close(): Promise<void> {
     this.raw?.close()
     this.raw = null
@@ -286,6 +318,39 @@ class PostgresDriver implements DbDriver {
     await this.require().query(sql)
   }
 
+  async withTransaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
+    const client = await this.require().connect()
+    const tx: Tx = {
+      get: async <T2>(sql: string, params?: unknown[]) => {
+        const res = await client.query(toPgSql(sql), params ?? [])
+        return res.rows[0] as T2 | undefined
+      },
+      all: async <T2>(sql: string, params?: unknown[]) => {
+        const res = await client.query(toPgSql(sql), params ?? [])
+        return res.rows as T2[]
+      },
+      run: async (sql: string, params?: unknown[]) => {
+        const res = await client.query(toPgSql(sql), params ?? [])
+        return { changes: res.rowCount ?? 0 }
+      },
+    }
+    try {
+      await client.query("BEGIN")
+      const result = await fn(tx)
+      await client.query("COMMIT")
+      return result
+    } catch (e) {
+      try {
+        await client.query("ROLLBACK")
+      } catch {
+        /* ignore */
+      }
+      throw e
+    } finally {
+      client.release()
+    }
+  }
+
   async close(): Promise<void> {
     await this.pool?.end()
     this.pool = null
@@ -316,5 +381,6 @@ export const db = {
   all: <T>(sql: string, params?: unknown[]) => withReady(() => driver.all<T>(sql, params)),
   run: (sql: string, params?: unknown[]) => withReady(() => driver.run(sql, params)),
   exec: (sql: string) => withReady(() => driver.exec(sql)),
+  withTransaction: <T>(fn: (tx: Tx) => Promise<T>) => withReady(() => driver.withTransaction(fn)),
   close: () => driver.close(),
 }

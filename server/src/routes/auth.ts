@@ -62,9 +62,12 @@ authRouter.post(
       res.status(400).json({ error: "missing token" })
       return
     }
-    const session = await db.get<{ dev_id: string }>("SELECT * FROM sessions WHERE token = ?", [parsed.data.token])
+    const session = await db.get<{ dev_id: string }>("SELECT * FROM sessions WHERE token = ? AND expires_at > ?", [
+      parsed.data.token,
+      Date.now(),
+    ])
     if (!session) {
-      res.status(401).json({ error: "invalid session" })
+      res.status(401).json({ error: "invalid or expired session" })
       return
     }
 
@@ -79,11 +82,11 @@ authRouter.post(
       Date.now(),
     ])
 
-    if (privateKeyB64) {
-      res.json({ deviceId, publicKey: publicKeyB64, privateKey: privateKeyB64 })
-      return
-    }
-
-    res.json({ deviceId, publicKey: publicKeyB64, proof: "registered" })
+    res.json({
+      deviceId,
+      publicKey: publicKeyB64,
+      proof: privateKeyB64 ? "keypair generated on server" : "registered",
+      ...(privateKeyB64 ? { privateKey: privateKeyB64 } : {}),
+    })
   })
 )

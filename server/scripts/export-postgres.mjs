@@ -28,6 +28,7 @@ const tables = [
   "serves",
   "impressions",
   "fraud_events",
+  "admin_actions",
   "payouts",
   "update_manifests",
   "split_contract",

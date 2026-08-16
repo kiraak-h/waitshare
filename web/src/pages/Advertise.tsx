@@ -20,7 +20,6 @@ export default function Advertise() {
   const [cpm, setCpm] = useState(200)
   const [blocks, setBlocks] = useState(1)
   const [speed, setSpeed] = useState("fast")
-  const [leaderboard, setLeaderboard] = useState(true)
   const [result, setResult] = useState<CreateResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -64,7 +63,6 @@ export default function Advertise() {
           cpmCents: cpm,
           blocks,
           deliverySpeed: speed,
-          leaderboard,
         }),
       })
       setResult(res)
@@ -144,10 +142,6 @@ export default function Advertise() {
               <option value="fast">Fast · ASAP</option>
             </select>
           </label>
-          <label className="checkbox">
-            <input type="checkbox" checked={leaderboard} onChange={(e) => setLeaderboard(e.target.checked)} />
-            <span>Show this campaign on the public leaderboard</span>
-          </label>
 
           <button className="btn btn-primary btn-block" disabled={busy}>
             {busy ? "Creating…" : `Checkout · $${centsToDollars(total)}`}
@@ -172,8 +166,8 @@ export default function Advertise() {
               {formatNumber(blocks * 1000)} impressions · ${centsToDollars(total)}
             </p>
             <p className="muted">
-              {Math.floor(cpm / 10) / 100} cents per impression · dev keeps{" "}
-              {(Math.floor((cpm * 1000) / 1000 / 100) * 0.6).toFixed(4)} cents of it.
+              {(cpm / 1000).toFixed(3)} cents per impression · dev keeps{" "}
+              {((cpm / 1000) * 0.6).toFixed(4)} cents of it.
             </p>
           </div>
 

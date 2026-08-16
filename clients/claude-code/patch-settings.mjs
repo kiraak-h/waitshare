@@ -31,7 +31,7 @@ const statusLine = {
   command: `node ${cliPath} status`,
 }
 
-const hooks = {
+const ourHooks = {
   SessionStart: [{ matcher: "", hooks: [{ type: "command", command: `node ${cliPath} start` }] }],
   Stop: [{ matcher: "", hooks: [{ type: "command", command: `node ${cliPath} report` }] }],
 }
@@ -42,9 +42,18 @@ if (fs.existsSync(settingsPath)) {
 }
 
 settings.statusLine = statusLine
+
+// Merge hooks instead of overwriting so a user's existing SessionStart/Stop
+// hooks from other tools are preserved. Waitshare entries are removed first so
+// re-running the installer never duplicates them.
 settings.hooks = settings.hooks ?? {}
-settings.hooks.SessionStart = hooks.SessionStart
-settings.hooks.Stop = hooks.Stop
+for (const [name, ours] of Object.entries(ourHooks)) {
+  const existing = Array.isArray(settings.hooks[name]) ? settings.hooks[name] : []
+  const kept = existing.filter(
+    (h) => !(h?.hooks ?? []).some((x) => String(x?.command ?? "").includes("waitshare"))
+  )
+  settings.hooks[name] = [...kept, ...ours]
+}
 
 fs.mkdirSync(path.dirname(settingsPath), { recursive: true })
 fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n")

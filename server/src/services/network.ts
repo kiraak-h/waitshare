@@ -25,9 +25,11 @@ export interface NetworkSignals {
 }
 
 export function getClientIp(req: Request): string {
-  const fwd = req.headers["x-forwarded-for"]
-  if (typeof fwd === "string" && fwd.length > 0) {
-    return fwd.split(",")[0].trim()
+  if (config.trustProxy) {
+    const fwd = req.headers["x-forwarded-for"]
+    if (typeof fwd === "string" && fwd.length > 0) {
+      return fwd.split(",")[0].trim()
+    }
   }
   return req.socket.remoteAddress ?? "unknown"
 }
@@ -56,10 +58,6 @@ function hashWithSalt(input: string): string {
  * Backed by a bundled ASN/cloud-range dataset (server/assets/asn.json, AWS + DigitalOcean);
  * supply your own dataset via ASN_DB_PATH (e.g. a GeoLite2-derived list) to extend coverage.
  */
-export function classifyNetwork(ip: string): { kind: string; name?: string } {
-  return classifyIp(ip)
-}
-
 export function deriveNetworkSignals(req: Request): NetworkSignals {
   const ip = getClientIp(req)
   const cls = classifyIp(ip)
@@ -69,8 +67,4 @@ export function deriveNetworkSignals(req: Request): NetworkSignals {
     kind: cls.kind,
     asnName: cls.name,
   }
-}
-
-export function hashIpDirect(ip: string): string {
-  return hashWithSalt(ip)
 }

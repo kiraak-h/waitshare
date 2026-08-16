@@ -1,6 +1,7 @@
 import { Router } from "express"
 import { db } from "../db.js"
 import { config } from "../config.js"
+import { timingSafeEqualStr } from "../services/signing.js"
 import { snapshot } from "../services/metrics.js"
 import { asyncHandler } from "../async-handler.js"
 
@@ -10,7 +11,7 @@ metricsRouter.get(
   "/",
   asyncHandler(async (req, res) => {
     const token = req.headers["authorization"]?.replace(/^Bearer\s+/i, "")
-    if (!config.adminToken || token !== config.adminToken) {
+    if (!config.adminToken || !timingSafeEqualStr(token ?? "", config.adminToken)) {
       res.status(401).json({ error: "admin token required" })
       return
     }

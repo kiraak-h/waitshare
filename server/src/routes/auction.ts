@@ -7,6 +7,15 @@ import type { AuctionStateDto, CampaignDto } from "../types.js"
 export const auctionRouter = Router()
 
 function toCampaignDto(row: CampaignRow): CampaignDto {
+  let countryFilter: string[] | null = null
+  if (row.country_filter) {
+    try {
+      const parsed = JSON.parse(row.country_filter)
+      countryFilter = Array.isArray(parsed) ? parsed : null
+    } catch {
+      countryFilter = null
+    }
+  }
   return {
     id: row.id,
     advertiserId: row.advertiser_id,
@@ -18,7 +27,7 @@ function toCampaignDto(row: CampaignRow): CampaignDto {
     blocks: row.blocks,
     impressionsBought: row.impressions_bought,
     impressionsServed: row.impressions_served,
-    countryFilter: row.country_filter ? JSON.parse(row.country_filter) : null,
+    countryFilter,
     deliverySpeed: row.delivery_speed,
     status: row.status,
     createdAt: row.created_at,

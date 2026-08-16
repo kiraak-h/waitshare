@@ -21,7 +21,8 @@ const FEATURES = ["regularity", "durationUniformity", "viewabilityUniformity", "
 const args = process.argv.slice(2)
 const dataIdx = args.indexOf("--data")
 const dataPath = dataIdx >= 0 ? args[dataIdx + 1] : null
-const outPath = args.find((a) => !a.startsWith("--")) ?? path.resolve(import.meta.dirname, "../assets/risk-model.json")
+const outIdx = args.indexOf("--out")
+const outPath = outIdx >= 0 ? args[outIdx + 1] : path.resolve(import.meta.dirname, "../assets/risk-model.json")
 
 function gaussian(mean, std) {
   let u = 0

@@ -84,8 +84,8 @@ export default function Leaderboard() {
                 <tbody>
                   {ledger.entries.map((e) => (
                     <tr key={e.campaignId}>
-                      <td>{e.brand}</td>
-                      <td className="mono">{e.adLine}</td>
+                      <td>{e.brand || "—"}</td>
+                      <td className="mono">{e.adLine || "—"}</td>
                       <td>{e.surface}</td>
                       <td className="num">${centsToDollars(e.cpmCents)}</td>
                       <td className="num">

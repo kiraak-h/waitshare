@@ -27,7 +27,7 @@ interface DevRow {
 async function requireDev(req: Request): Promise<DevRow | null> {
   const token = req.headers["authorization"]?.replace(/^Bearer\s+/i, "")
   if (!token) return null
-  const session = await db.get<{ dev_id: string }>("SELECT * FROM sessions WHERE token = ?", [token])
+  const session = await db.get<{ dev_id: string }>("SELECT * FROM sessions WHERE token = ? AND expires_at > ?", [token, Date.now()])
   if (!session) return null
   const dev = await db.get<DevRow>("SELECT * FROM devs WHERE id = ?", [session.dev_id])
   return dev ?? null
@@ -40,10 +40,10 @@ function toDto(dev: DevRow): DevDto {
     country: dev.country,
     status: dev.status,
     trustTier: dev.trust_tier,
-    balanceCents: Math.floor(dev.balance_mills / 100),
-    reserveCents: Math.floor(dev.reserve_mills / 100),
-    totalEarnedCents: Math.floor(dev.total_earned_mills / 100),
-    paidCents: Math.floor(dev.paid_mills / 100),
+    balanceCents: Math.floor(dev.balance_mills / 1000),
+    reserveCents: Math.floor(dev.reserve_mills / 1000),
+    totalEarnedCents: Math.floor(dev.total_earned_mills / 1000),
+    paidCents: Math.floor(dev.paid_mills / 1000),
     stripeOnboarded: dev.stripe_onboarded === 1,
     createdAt: dev.created_at,
   }
@@ -71,7 +71,6 @@ devRouter.get(
     }
     const rows = await db.all<{
       id: string
-      serve_id: string
       surface: string
       duration_ms: number
       viewable_pct: number
@@ -79,10 +78,10 @@ devRouter.get(
       gross_mills: number
       dev_share_mills: number
       status: string
-      ad_line: string
-      url: string
+      ad_line: string | null
+      url: string | null
     }>(
-      "SELECT i.id, i.serve_id, i.surface, i.duration_ms, i.viewable_pct, i.served_at, i.gross_mills, i.dev_share_mills, i.status, c.ad_line, c.url FROM impressions i LEFT JOIN campaigns c ON c.id = i.campaign_id WHERE i.dev_id = ? ORDER BY i.served_at DESC LIMIT 100",
+      "SELECT i.id, i.surface, i.duration_ms, i.viewable_pct, i.served_at, i.gross_mills, i.dev_share_mills, i.status, c.ad_line, c.url FROM impressions i LEFT JOIN campaigns c ON c.id = i.campaign_id WHERE i.dev_id = ? ORDER BY i.served_at DESC LIMIT 100",
       [dev.id]
     )
 
@@ -138,11 +137,11 @@ devRouter.post(
       res.status(403).json({ error: "account not eligible for payout" })
       return
     }
-    if (dev.balance_mills < config.paymentThresholdCents * 100) {
+    if (dev.balance_mills < config.paymentThresholdCents * 1000) {
       res.status(422).json({ error: "below payment threshold" })
       return
     }
-    if ((await computeTrustTier(dev.id)) === 0 && dev.balance_mills / 100 > config.tier3.tier0PayoutCapCents) {
+    if ((await computeTrustTier(dev.id)) === 0 && dev.balance_mills / 1000 > config.tier3.tier0PayoutCapCents) {
       res.status(422).json({ error: "new account payout cap reached", capCents: config.tier3.tier0PayoutCapCents })
       return
     }
@@ -164,15 +163,27 @@ devRouter.post(
       }
     }
 
-    const amountMills = dev.balance_mills
     const payoutId = randomUUID()
     const now = Date.now()
     const availableAt = now + config.payoutHoldMs
-    await db.run(
-      "INSERT INTO payouts (id, dev_id, amount_mills, status, available_at, created_at) VALUES (?, ?, ?, 'held', ?, ?)",
-      [payoutId, dev.id, amountMills, availableAt, now]
-    )
-    await db.run("UPDATE devs SET balance_mills = 0 WHERE id = ?", [dev.id])
+    const amountMills = await db.withTransaction(async (tx) => {
+      const current = await tx.get<{ balance_mills: number }>("SELECT balance_mills FROM devs WHERE id = ?", [dev.id])
+      if (!current || current.balance_mills < config.paymentThresholdCents * 1000) return null
+      const claimed = await tx.run("UPDATE devs SET balance_mills = 0 WHERE id = ? AND balance_mills = ?", [
+        dev.id,
+        current.balance_mills,
+      ])
+      if (claimed.changes !== 1) return null
+      await tx.run(
+        "INSERT INTO payouts (id, dev_id, amount_mills, status, available_at, created_at) VALUES (?, ?, ?, 'held', ?, ?)",
+        [payoutId, dev.id, current.balance_mills, availableAt, now]
+      )
+      return current.balance_mills
+    })
+    if (amountMills === null) {
+      res.status(409).json({ error: "balance changed; retry payout" })
+      return
+    }
 
     res.json({
       payoutId,

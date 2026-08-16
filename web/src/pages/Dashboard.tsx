@@ -239,15 +239,19 @@ export default function Dashboard() {
             </div>
             <div className="market-cell">
               <span className="market-value">
-                {dev ? `${Math.max(0, (me?.thresholdCents ?? 1000) - dev.balanceCents)}c` : "—"}
+                {dev
+                  ? `$${(Math.max(0, (me?.thresholdCents ?? 1000) - dev.balanceCents) / 100).toFixed(2)}`
+                  : "—"}
               </span>
-              <span className="market-label">Left to threshold ($10)</span>
+              <span className="market-label">
+                Left to threshold (${((me?.thresholdCents ?? 1000) / 100).toFixed(2)})
+              </span>
             </div>
           </div>
 
           <div className="card action-row">
             <button className="btn btn-primary" onClick={registerDevice}>
-              Register device key (demo)
+              Register device key
             </button>
             <button className="btn btn-ghost" onClick={onboarding}>
               {dev?.stripeOnboarded ? "Stripe connected" : "Start Stripe onboarding"}
@@ -289,7 +293,7 @@ export default function Dashboard() {
                       <tr key={r.id}>
                         <td title={formatDate(r.servedAt)}>{timeAgo(r.servedAt)}</td>
                         <td>{r.surface}</td>
-                        <td className="mono">{r.adLine}</td>
+                        <td className="mono">{r.adLine || "—"}</td>
                         <td className="num">{(r.durationMs / 1000).toFixed(1)}s</td>
                         <td className="num">${millsToDollars(r.devShareMills)}</td>
                         <td>
