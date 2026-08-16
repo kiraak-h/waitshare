@@ -226,8 +226,9 @@ docker compose up -d --build
   combine with structured platform logging if you need log shipping.
 - **Rate limiting.** In-process fixed-window limiter per client IP. `POST /auth/*`
   is limited to 120 req/min and `GET /ads/next` to 120 req/min; over-limit returns
-  `429` with `retryAfterMs`. `trust proxy` is set to one hop, so set it correctly
-  behind your reverse proxy to get real client IPs.
+  `429` with `retryAfterMs`. Trusted-proxy support is **fail-closed and opt-in**:
+  only set `TRUST_PROXY=1` when the API sits behind your reverse proxy, so
+  `X-Forwarded-For` cannot be spoofed to rotate rate limits or network hashing.
 - **Backups.** `npm run backup -w server` snapshots the datastore:
   `pg_dump | gzip` when `DATABASE_URL` is set, otherwise a `better-sqlite3` online
   backup of the SQLite file — both into `BACKUP_DIR` (default `<DATA_DIR>/backups`)

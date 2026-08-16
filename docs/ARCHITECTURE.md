@@ -31,7 +31,7 @@ dev_share = floor(gross × dev_share_pct / 100)
 ```
 client                          server
   |  GET /ads/next?surface=&deviceId=   |
-  |------------------------------------>|  pickNextAd() -> create serve (90s TTL, status=pending)
+  |------------------------------------>|  pickNextAd() -> create serve (30min TTL, status=pending)
   |  { serveId, adLine, url, expiresAt }|
   |<------------------------------------|
   |  [sponsored line on screen]         |
@@ -70,7 +70,7 @@ served to a device twice in a row. Blocks are 1,000 impressions each.
 - **Update integrity**: the server signs `{ platform, version, url, sha256 }`. Clients verify
   against the published public key before applying anything.
 - **Fraud controls**: minimum 10s display, minimum 50% viewability, hourly/daily per-device caps,
-  single-use 90s serves. Fleet-wide Tier 2 signals (farm: ≥`TIER2_FARM_DEVS` accounts per masked
+  single-use expiring serves (default 30min TTL, env-tunable). Fleet-wide Tier 2 signals (farm: ≥`TIER2_FARM_DEVS` accounts per masked
   network; VPN rotation: ≥`TIER2_VPN_NETWORKS` networks per account; IP binding on each serve) are
   implemented in `services/fraud.ts` + `services/network.ts` and audited to `fraud_events`.
 

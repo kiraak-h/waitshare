@@ -33,9 +33,9 @@ Stops drive-by abuse; does not stop organized abuse, but every higher layer depe
 - **Signed impressions.** Every event is Ed25519-signed with a device private key held by the
   client. The server stores only the public key and verifies the canonical payload
   `{ serveId, deviceId, durationMs, viewablePct, focusPct, nonce, ts }`.
-- **Single-use, expiring serves.** A serve is issued for 90 seconds (env-tunable via
-  `SERVE_TTL_MS`) and transitions pending → completed/void. Replays and reuse are rejected
-  (`server/src/services/ledger.ts`).
+- **Single-use, expiring serves.** A serve is issued with a 30-minute default TTL
+  (env-tunable via `SERVE_TTL_MS`) and transitions pending → completed/void. Replays and
+  reuse are rejected (`server/src/services/ledger.ts`).
 - **Quality thresholds.** ≥10s continuous display, ≥50% viewability, and optional ≥`MIN_FOCUS_PCT`
   focus time (`server/src/services/fraud.ts`).
 - **Caps.** Per-device hourly/daily caps (`CAP_HOURLY`, `CAP_DAILY`), a pending-serve cap
