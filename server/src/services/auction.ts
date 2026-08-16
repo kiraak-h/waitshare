@@ -67,17 +67,22 @@ export async function pickNextAd(
   const devCountry = devId
     ? ((await db.get<{ country: string | null }>("SELECT country FROM devs WHERE id = ?", [devId]))?.country ?? null)
     : null
-  if (devCountry) {
-    candidates = candidates.filter((c) => {
-      if (!c.country_filter) return true
-      try {
-        const allowed = JSON.parse(c.country_filter)
-        return Array.isArray(allowed) && allowed.includes(devCountry)
-      } catch {
-        return true
-      }
-    })
-  }
+  candidates = candidates.filter((c) => {
+    if (!c.country_filter) return true
+    let allowed: string[] = []
+    try {
+      const parsed = JSON.parse(c.country_filter)
+      if (Array.isArray(parsed)) allowed = parsed
+    } catch {
+      return true
+    }
+    if (allowed.length === 0) return true
+    // Unknown country (unregistered device or no country on file): do not
+    // serve a geographically restricted ad to an audience the advertiser did
+    // not target. Non-restricted campaigns are unaffected.
+    if (!devCountry) return false
+    return allowed.map((x) => x.toUpperCase()).includes(devCountry.toUpperCase())
+  })
   if (candidates.length === 0) return null
 
   const deliveryPriority: Record<string, number> = { fast: 0, medium: 1, slow: 2 }

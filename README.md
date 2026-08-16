@@ -61,7 +61,7 @@ All routes are under `/api/v1`.
 
 | Route | Purpose |
 | --- | --- |
-| `GET /ads/next?surface=&deviceId=` | Issue an ad serve (90s TTL) |
+| `GET /ads/next?surface=&deviceId=` | Issue an ad serve (default 30 min TTL) |
 | `POST /ads/impressions` | Report a signed impression; credit dev at locked split |
 | `POST /auth/register` | Create/sign-in a developer account |
 | `POST /auth/device` | Register a device Ed25519 public key |
@@ -172,7 +172,9 @@ Client updates are integrity-protected end-to-end:
 
 - **Configuration** — all knobs documented in `.env.example`; the server validates its
   configuration at startup (hard errors for `STRIPE_MODE=live` without a key, warnings for
-  production defaults like demo seeding or localhost base URLs).
+  production defaults like demo seeding or localhost base URLs). `X-Forwarded-For` is trusted
+  only when `TRUST_PROXY=1` (default off), so a directly exposed API cannot spoof the header to
+  rotate IP rate limits or network hashing.
 - **Payments / OAuth** — `STRIPE_MODE=stub` exercises the full marketplace without keys; set
   `STRIPE_MODE=live` with real `STRIPE_SECRET_KEY`/`STRIPE_WEBHOOK_SECRET` and
   `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` to go live.
@@ -193,7 +195,8 @@ Client updates are integrity-protected end-to-end:
   nonce; the server rejects unsigned, wrongly-signed, or nonce-mismatched events.
 - IP addresses are masked to the /24 (IPv6 /48), salted, and SHA-256 hashed; only the hashes are
   persisted and used transiently for fleet detection — raw IPs are never stored.
-- Serve records expire after 90 seconds, can be used once, and cap at `MAX_PENDING_SERVES` per device.
+- Serve records expire after the serve TTL (default 30 minutes, matching the single-impression
+  duration cap), can be used once, and cap at `MAX_PENDING_SERVES` per device.
 
 ## Production roadmap
 

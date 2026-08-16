@@ -166,28 +166,41 @@ devRouter.post(
     const payoutId = randomUUID()
     const now = Date.now()
     const availableAt = now + config.payoutHoldMs
-    const amountMills = await db.withTransaction(async (tx) => {
+    const result = await db.withTransaction(async (tx) => {
       const current = await tx.get<{ balance_mills: number }>("SELECT balance_mills FROM devs WHERE id = ?", [dev.id])
-      if (!current || current.balance_mills < config.paymentThresholdCents * 1000) return null
+      if (!current || current.balance_mills < config.paymentThresholdCents * 1000) return { code: "below" }
+      // Re-check the tier0 cap on the fresh balance too: releaseReserves can
+      // push the balance up between the outer check and this transaction.
+      if ((await computeTrustTier(dev.id)) === 0 && current.balance_mills / 1000 > config.tier3.tier0PayoutCapCents) {
+        return { code: "cap", capCents: config.tier3.tier0PayoutCapCents }
+      }
       const claimed = await tx.run("UPDATE devs SET balance_mills = 0 WHERE id = ? AND balance_mills = ?", [
         dev.id,
         current.balance_mills,
       ])
-      if (claimed.changes !== 1) return null
+      if (claimed.changes !== 1) return { code: "race" }
       await tx.run(
         "INSERT INTO payouts (id, dev_id, amount_mills, status, available_at, created_at) VALUES (?, ?, ?, 'held', ?, ?)",
         [payoutId, dev.id, current.balance_mills, availableAt, now]
       )
-      return current.balance_mills
+      return { code: "ok", amountMills: current.balance_mills }
     })
-    if (amountMills === null) {
+    if (result.code === "below") {
+      res.status(422).json({ error: "below payment threshold" })
+      return
+    }
+    if (result.code === "cap") {
+      res.status(422).json({ error: "new account payout cap reached", capCents: result.capCents })
+      return
+    }
+    if (result.code === "race") {
       res.status(409).json({ error: "balance changed; retry payout" })
       return
     }
 
     res.json({
       payoutId,
-      amountMills,
+      amountMills: result.amountMills,
       status: "held",
       availableAt,
       holdMs: config.payoutHoldMs,

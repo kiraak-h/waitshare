@@ -9,6 +9,8 @@ const SURFACE = "vscode"
 const MIN_DURATION_MS = 10_000
 const MAX_AUTO_MS = 120_000
 const AUTO_TICK_MS = 5_000
+// Server-side cap for a single impression duration.
+const MAX_DURATION_MS = 30 * 60 * 1000
 const VERSION = "0.1.0"
 
 const home = () => path.join(os.homedir(), ".waitshare")
@@ -72,7 +74,7 @@ async function reportImpression(config: Config, focusMs: number, windowFocusedNo
     nonce: string
   }
 
-  const durationMs = Date.now() - current.startedAt
+  const durationMs = Math.min(Date.now() - current.startedAt, MAX_DURATION_MS)
   if (durationMs < MIN_DURATION_MS) {
     fs.rmSync(currentPath(), { force: true })
     return "too short"

@@ -62,8 +62,13 @@ app.use("/api/v1/split", splitRouter)
 app.use("/api/v1/admin", adminRouter)
 app.use("/api/v1/metrics", metricsRouter)
 
-// JSON error handler — never leak HTML stack traces to API clients.
+// JSON error handler — never leak HTML stack traces to API clients. Malformed
+// JSON bodies (body-parser SyntaxError) are a client mistake, so 400, not 500.
 app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if (err instanceof SyntaxError && "body" in err && err.message.includes("JSON")) {
+    res.status(400).json({ error: "invalid JSON body" })
+    return
+  }
   console.error(`[waitshare] error ${req.method} ${req.originalUrl}:`, err)
   res.status(500).json({ error: "internal error" })
 })

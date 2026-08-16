@@ -12,6 +12,11 @@ const SURFACE = "claude-code-cli"
 const MIN_DURATION_MS = 10_000
 const AUTO_TICK_MS = 5_000
 const MAX_AUTO_MS = 120_000
+// Display staleness for the status line only; the credit window is the
+// server's serve TTL (default 30 min), so a long session still gets credited.
+const SERVE_STALE_MS = 90_000
+// Server-side cap for a single impression duration.
+const MAX_DURATION_MS = 30 * 60 * 1000
 const VERSION = "0.1.0"
 
 function readConfig() {
@@ -59,7 +64,7 @@ function status() {
     return
   }
   const current = JSON.parse(fs.readFileSync(CURRENT_PATH, "utf8"))
-  if (Date.now() - current.startedAt > 90_000) {
+  if (Date.now() - current.startedAt > SERVE_STALE_MS) {
     process.stdout.write("")
     return
   }
@@ -71,7 +76,7 @@ async function report() {
   if (!fs.existsSync(CURRENT_PATH)) return
   const current = JSON.parse(fs.readFileSync(CURRENT_PATH, "utf8"))
 
-  const durationMs = Date.now() - current.startedAt
+  const durationMs = Math.min(Date.now() - current.startedAt, MAX_DURATION_MS)
   if (durationMs < MIN_DURATION_MS) {
     fs.rmSync(CURRENT_PATH, { force: true })
     return

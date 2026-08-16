@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react"
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react"
 import { api } from "../api"
 import { formatDate, millsToDollars, timeAgo } from "../utils"
 
@@ -51,6 +51,7 @@ export default function Admin() {
   const [offset, setOffset] = useState(0)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [timeline, setTimeline] = useState<DevTimeline | null>(null)
+  const timelineReq = useRef(0)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -86,11 +87,14 @@ export default function Admin() {
   async function loadTimeline(devId: string) {
     if (!token) return
     setErr(null)
+    const req = ++timelineReq.current
     try {
       const t = await api<DevTimeline>(`/admin/review/${devId}`, {}, token)
+      if (req !== timelineReq.current) return
       setTimeline(t)
       setExpandedId(devId)
     } catch (e) {
+      if (req !== timelineReq.current) return
       setErr(String(e))
     }
   }
@@ -237,8 +241,10 @@ export default function Admin() {
                       timeline={expandedId === d.id ? timeline : null}
                       onExpand={() => {
                         if (expandedId === d.id) {
+                          timelineReq.current++
                           setExpandedId(null)
                         } else {
+                          timelineReq.current++
                           setTimeline(null)
                           void loadTimeline(d.id)
                         }

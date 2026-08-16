@@ -102,7 +102,18 @@ if (config.stripeMode === "stub") {
 } else {
   advertiserRouter.post(
     "/campaigns/:id/confirm",
-    asyncHandler(async (_req, res) => {
+    asyncHandler(async (req, res) => {
+      const campaign = await db.get<{ status: string }>("SELECT status FROM campaigns WHERE id = ?", [req.params.id])
+      if (!campaign) {
+        res.status(404).json({ error: "campaign not found" })
+        return
+      }
+      // The webhook already activated this campaign; treat a post-checkout
+      // "confirm" click as a no-op success instead of a confusing 403.
+      if (campaign.status === "active") {
+        res.json({ ok: true, status: "active" })
+        return
+      }
       res.status(403).json({ error: "campaign activation happens via the payment webhook in live mode" })
     })
   )

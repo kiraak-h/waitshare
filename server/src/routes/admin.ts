@@ -64,11 +64,15 @@ adminRouter.get(
     const limit = Math.min(Math.max(Number(req.query.limit ?? 100) || 100, 1), 200)
     const offset = Math.max(Number(req.query.offset ?? 0) || 0, 0)
 
+    // Bound the working set in SQL (5000 flagged devs is far beyond the
+    // expected scale); the optional label filter still runs in JS since the
+    // label lives inside a JSON column.
     const flaggedRaw = await db.all<DevRow>(
       DEV_SELECT +
         "WHERE d.fraud_flags > 0 OR EXISTS " +
         "(SELECT 1 FROM fraud_events f WHERE f.dev_id = d.id AND f.created_at > ?) " +
-        "ORDER BY d.fraud_flags DESC, d.created_at ASC",
+        "ORDER BY d.fraud_flags DESC, d.created_at ASC " +
+        "LIMIT 5000",
       [since]
     )
     const flagged = label ? flaggedRaw.filter((d) => (parseLabels(d.fraud_labels)[label] ?? 0) > 0) : flaggedRaw

@@ -45,10 +45,11 @@ export const config = {
   webDistDir: process.env.WEB_DIST_DIR ?? path.resolve(import.meta.dirname, "../../web/dist"),
   publicBaseUrl: process.env.PUBLIC_BASE_URL ?? "http://localhost:3001",
   webBaseUrl: process.env.WEB_BASE_URL ?? "http://localhost:5173",
-  // When behind a trusted reverse proxy, honor X-Forwarded-For for rate
-  // limiting and network hashing. Set TRUST_PROXY=0 when the API is directly
-  // exposed so clients cannot spoof the header to rotate their limits.
-  trustProxy: process.env.TRUST_PROXY !== "0",
+  // Fail closed: only trust X-Forwarded-For when explicitly placed behind a
+  // trusted reverse proxy (TRUST_PROXY=1). With the default off, a directly
+  // exposed API cannot be spoofed to rotate IP-based rate limits or network
+  // hashing. The platform preview sets TRUST_PROXY=1 for its proxy.
+  trustProxy: process.env.TRUST_PROXY === "1",
   stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? "",
   stripeMode: process.env.STRIPE_MODE ?? "stub",
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
@@ -85,7 +86,10 @@ export const config = {
     tier0DailyCap: Number(process.env.TIER0_CAP_DAILY ?? 100),
     tier0PayoutCapCents: Number(process.env.TIER0_PAYOUT_CAP_CENTS ?? 10000),
   },
-  serveTtlMs: Number(process.env.SERVE_TTL_MS ?? 90_000),
+  // Serves stay claimable for up to the impression duration cap so a client
+  // that reports late (e.g. a long focused Claude Code session or a vscode
+  // auto-earn window) still gets credited. 90s would reject those reports.
+  serveTtlMs: Number(process.env.SERVE_TTL_MS ?? 30 * 60 * 1000),
   caps: {
     hourlyImpressions: Number(process.env.CAP_HOURLY ?? 60),
     dailyImpressions: Number(process.env.CAP_DAILY ?? 600),

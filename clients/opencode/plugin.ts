@@ -67,20 +67,25 @@ export const WaitSharePlugin = async ({ client }: { client: any }) => {
     }
   }
 
-  async function reportServe() {
-    if (!config || !serve) return
-    const { serveId, startedAt, nonce } = serve
-    serve = null
-    const durationMs = Date.now() - startedAt
-    if (durationMs < MIN_DURATION_MS) return
+  // Reports the current serve. Returns true when the server responded (the
+  // serve was credited or rejected and can be cleared); returns false on a
+  // network error so the next tick can retry the same serve instead of losing it.
+  async function reportServe(): Promise<boolean> {
+    if (!config || !serve) return false
+    const s = { ...serve }
+    const durationMs = Date.now() - s.startedAt
+    if (durationMs < MIN_DURATION_MS) {
+      if (serve?.serveId === s.serveId) serve = null
+      return true
+    }
     try {
       const payload = {
-        serveId,
+        serveId: s.serveId,
         deviceId: config.deviceId,
         durationMs,
         viewablePct: 95,
         focusPct: 100,
-        nonce,
+        nonce: s.nonce,
         ts: Date.now(),
       }
       const signature = await signPayload(payload, config.privateKeyB64)
@@ -90,6 +95,8 @@ export const WaitSharePlugin = async ({ client }: { client: any }) => {
         body: JSON.stringify({ ...payload, signature }),
       })
       const body = await res.json()
+      // Only clear the serve if it's still the one we just reported.
+      if (serve?.serveId === s.serveId) serve = null
       if (body?.credited) {
         await client?.app?.log?.({
           body: {
@@ -102,8 +109,11 @@ export const WaitSharePlugin = async ({ client }: { client: any }) => {
       } else {
         console.error("[waitshare] impression rejected:", body?.error, body?.reason ?? "")
       }
+      return true
     } catch (e) {
+      // Keep the serve so the next tick retries; the server dedupes by serveId.
       console.error("[waitshare] impression report failed:", e)
+      return false
     }
   }
 
@@ -142,8 +152,8 @@ export const WaitSharePlugin = async ({ client }: { client: any }) => {
         ticking = true
         try {
           if (serve && Date.now() - serve.startedAt >= MIN_DURATION_MS && Date.now() - (sessionStartedAt ?? Date.now()) <= MAX_AUTO_MS) {
-            await reportServe()
-            if (active) await fetchNext()
+            const reported = await reportServe()
+            if (reported && active) await fetchNext()
           }
         } finally {
           ticking = false

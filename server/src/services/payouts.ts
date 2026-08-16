@@ -39,9 +39,14 @@ export async function processHeldPayouts(): Promise<{ processed: number; failed:
           devId: p.dev_id,
           accountId: dev.stripe_account_id,
           amountCents: Math.floor(p.amount_mills / 1000),
+          // The payout id lets a transfer.created webhook reconcile a transfer
+          // even if we crash between createTransfer and recording the id here.
           metadata: { payoutId: p.id },
         })
-        await db.run("UPDATE payouts SET status = 'pending', stripe_transfer_id = ? WHERE id = ?", [
+        // Conditional on status='held': if the transfer.created webhook already
+        // cleared this payout (status='cleared') before this write lands, do not
+        // clobber it back to 'pending'.
+        await db.run("UPDATE payouts SET status = 'pending', stripe_transfer_id = ? WHERE id = ? AND status = 'held'", [
           transfer.transferId,
           p.id,
         ])

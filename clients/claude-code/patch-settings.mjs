@@ -48,9 +48,11 @@ settings.statusLine = statusLine
 // re-running the installer never duplicates them.
 settings.hooks = settings.hooks ?? {}
 for (const [name, ours] of Object.entries(ourHooks)) {
-  const existing = Array.isArray(settings.hooks[name]) ? settings.hooks[name] : []
-  const kept = existing.filter(
-    (h) => !(h?.hooks ?? []).some((x) => String(x?.command ?? "").includes("waitshare"))
+  const existing = settings.hooks[name]
+  // A single object (not an array) is a valid hooks value too — preserve it.
+  const list = existing === undefined ? [] : Array.isArray(existing) ? existing : [existing]
+  const kept = list.filter(
+    (h) => !(h?.hooks ?? []).some((x) => String(x?.command ?? "").includes("waitshare.mjs"))
   )
   settings.hooks[name] = [...kept, ...ours]
 }

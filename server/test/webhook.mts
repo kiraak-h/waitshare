@@ -154,6 +154,47 @@ await t("webhook: transfer.created clears a payout and pays the dev", async () =
   assert.strictEqual(d?.paid_mills, 5000)
 })
 
+await t("webhook: transfer.created reconciles a payout by metadata.payoutId after a sweep crash", async () => {
+  const now = Date.now()
+  // Simulates the crash window: the sweep called createTransfer but died
+  // before writing stripe_transfer_id, so the payout still has NULL there.
+  await db.run("INSERT INTO devs (id, email, country, status, paid_mills, created_at) VALUES (?, ?, 'US', 'active', 0, ?)", [
+    "d-crash",
+    "crash@test.dev",
+    now,
+  ])
+  await db.run(
+    "INSERT INTO payouts (id, dev_id, amount_mills, status, stripe_transfer_id, available_at, created_at) VALUES (?, ?, 5000, 'held', NULL, ?, ?)",
+    ["p-crash", "d-crash", now, now]
+  )
+  await applyStripeEvent(
+    event("transfer.created", {
+      id: "tr_crash",
+      metadata: { payoutId: "p-crash" },
+    } as unknown as Stripe.Transfer)
+  )
+  const p = await db.get<{ status: string; stripe_transfer_id: string | null }>(
+    "SELECT status, stripe_transfer_id FROM payouts WHERE id = ?",
+    ["p-crash"]
+  )
+  assert.strictEqual(p?.status, "cleared")
+  assert.strictEqual(p?.stripe_transfer_id, "tr_crash")
+  const d = await db.get<{ paid_mills: number }>("SELECT paid_mills FROM devs WHERE id = ?", ["d-crash"])
+  assert.strictEqual(d?.paid_mills, 5000)
+})
+
+await t("webhook: redelivered transfer.created never double-credits a payout", async () => {
+  const now = Date.now()
+  await applyStripeEvent(
+    event("transfer.created", {
+      id: "tr_double",
+      metadata: { payoutId: "p-crash" },
+    } as unknown as Stripe.Transfer)
+  )
+  const d = await db.get<{ paid_mills: number }>("SELECT paid_mills FROM devs WHERE id = ?", ["d-crash"])
+  assert.strictEqual(d?.paid_mills, 5000)
+})
+
 await t("webhook: logFraudEvent buckets fraud_labels per dev", async () => {
   const now = Date.now()
   await db.run(

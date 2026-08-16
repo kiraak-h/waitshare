@@ -78,17 +78,28 @@ export async function applyStripeEvent(event: Stripe.Event): Promise<void> {
     }
     case "transfer.created": {
       const transfer = event.data.object as Stripe.Transfer
-      const result = await db.run(
-        "UPDATE payouts SET status = 'cleared', cleared_at = ? WHERE stripe_transfer_id = ? AND status <> 'cleared'",
-        [Date.now(), transfer.id]
-      )
+      const now = Date.now()
+      const payoutId = transfer.metadata?.payoutId
+      // Prefer matching on the payout id we stamp on the transfer at creation
+      // time: it lets this handler reconcile a payout even when the payout
+      // sweep crashed between createTransfer and recording stripe_transfer_id.
+      // The fallback (transfer id) covers transfers created before that change.
+      const result = payoutId
+        ? await db.run(
+            "UPDATE payouts SET status = 'cleared', cleared_at = ?, stripe_transfer_id = ? WHERE id = ? AND status <> 'cleared'",
+            [now, transfer.id, payoutId]
+          )
+        : await db.run(
+            "UPDATE payouts SET status = 'cleared', cleared_at = ? WHERE stripe_transfer_id = ? AND status <> 'cleared'",
+            [now, transfer.id]
+          )
       // Only credit paid_mills once per payout. Stripe redelivers webhooks,
       // and the conditional status update above makes this idempotent
       // regardless of whether the payout is still 'held' or already 'pending'.
       if (result.changes === 1) {
         const payout = await db.get<{ dev_id: string; amount_mills: number }>(
-          "SELECT dev_id, amount_mills FROM payouts WHERE stripe_transfer_id = ?",
-          [transfer.id]
+          "SELECT dev_id, amount_mills FROM payouts WHERE id = ? OR stripe_transfer_id = ? LIMIT 1",
+          [payoutId ?? "", transfer.id]
         )
         if (payout) {
           await db.run("UPDATE devs SET paid_mills = paid_mills + ? WHERE id = ?", [payout.amount_mills, payout.dev_id])
