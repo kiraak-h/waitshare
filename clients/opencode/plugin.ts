@@ -56,7 +56,7 @@ export const WaitSharePlugin = async ({ client }: { client: any }) => {
 
   if (!config) {
     console.error(
-      `[waitshare] not configured. Run: node clients/opencode/setup.mjs then reload opencode.`
+      `[waitshare] not configured. Run: node clients/shared/setup.mjs then reload opencode.`
     )
   }
 
